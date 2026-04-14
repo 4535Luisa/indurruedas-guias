@@ -1,0 +1,141 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap");
+
+:root {
+  --m: #aaff00;
+  --m-dark: #88cc00;
+  --m-dim: #aaff0018;
+  --m-dim2: #aaff0030;
+  --font-mono: "Space Mono", monospace;
+  --font-body: "DM Sans", sans-serif;
+}
+
+[data-theme="dark"] {
+  --blk: #0e0e0e;
+  --blk2: #161616;
+  --blk3: #1e1e1e;
+  --blk4: #282828;
+  --blk5: #333333;
+  --wht: #ffffff;
+  --wht2: #e8e8e8;
+  --wht3: #aaaaaa;
+  --gray: #666666;
+  --danger: #ff4444;
+  --warn: #ffaa00;
+  --info: #55aaff;
+  --purple: #aa88ff;
+  --bg-card: #161616;
+  --border: #282828;
+  --text-primary: #ffffff;
+  --text-secondary: #aaaaaa;
+  --text-muted: #666666;
+  --hover-bg: #1e1e1e;
+}
+
+[data-theme="light"] {
+  --blk: #f5f5f0;
+  --blk2: #ffffff;
+  --blk3: #f0f0ea;
+  --blk4: #e0e0d8;
+  --blk5: #cccccc;
+  --wht: #111111;
+  --wht2: #222222;
+  --wht3: #555555;
+  --gray: #888888;
+  --danger: #cc2222;
+  --warn: #cc8800;
+  --info: #1155cc;
+  --purple: #6644cc;
+  --bg-card: #ffffff;
+  --border: #e0e0d8;
+  --text-primary: #111111;
+  --text-secondary: #555555;
+  --text-muted: #888888;
+  --hover-bg: #f0f0ea;
+  --m: #5a8a00;
+  --m-dark: #447000;
+  --m-dim: #5a8a0015;
+  --m-dim2: #5a8a0030;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  min-height: 100vh;
+  background: var(--blk);
+  color: var(--wht2);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+
+input,
+select,
+textarea,
+button {
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+
+input,
+select {
+  background: var(--blk3);
+  border: 1px solid var(--blk5);
+  border-radius: 6px;
+  color: var(--wht2);
+  padding: 7px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input:focus,
+select:focus {
+  border-color: var(--m);
+}
+select option {
+  background: var(--blk2);
+  color: var(--wht2);
+}
+
+button {
+  cursor: pointer;
+  transition: all 0.15s;
+}
+a {
+  color: var(--m);
+  text-decoration: none;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--blk2);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--blk5);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--m);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}

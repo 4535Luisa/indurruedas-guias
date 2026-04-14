@@ -1,0 +1,12 @@
+{
+  "name": "indurruedas-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node estelar-bot.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "playwright": "^1.42.0"
+  }
+}

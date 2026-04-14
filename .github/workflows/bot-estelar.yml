@@ -1,0 +1,53 @@
+name: Bot Estelar Express
+
+on:
+  schedule:
+    # Horarios en UTC (Colombia = UTC-5)
+    # 8:00 AM Colombia  = 13:00 UTC
+    # 1:00 PM Colombia  = 18:00 UTC
+    # 6:00 PM Colombia  = 23:00 UTC
+    - cron: '0 13 * * 1-6'
+    - cron: '0 18 * * 1-6'
+    - cron: '0 23 * * 1-6'
+
+  # Permite ejecutar manualmente desde GitHub
+  workflow_dispatch:
+
+jobs:
+  sync-estelar:
+    name: Sincronizar Estelar Express
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: bot/package.json
+
+      - name: Instalar dependencias del bot
+        working-directory: ./bot
+        run: npm install
+
+      - name: Instalar navegador Playwright
+        working-directory: ./bot
+        run: npx playwright install chromium --with-deps
+
+      - name: Ejecutar bot
+        working-directory: ./bot
+        env:
+          GELOTRA_URL: ${{ secrets.GELOTRA_URL }}
+          GELOTRA_USER: ${{ secrets.GELOTRA_USER }}
+          GELOTRA_PASS: ${{ secrets.GELOTRA_PASS }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: node estelar-bot.js
+
+      - name: Notificar resultado
+        if: failure()
+        run: echo "❌ El bot de Estelar falló. Revisar logs arriba."
