@@ -8,18 +8,37 @@ export function AuthProvider({ children }) {
   const [perfil, setPerfil] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  async function cargarPerfil(userId) {
+    try {
+      const { data, error } = await supabase
+        .from("usuarios")
+        .select("*")
+        .eq("id", userId)
+        .single();
+      setPerfil(data || null);
+    } catch {
+      setPerfil(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    // Timeout de seguridad — si en 5 segundos no carga, mostrar login
+    const timeout = setTimeout(() => {
+      setLoading(false);
+    }, 5000);
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      clearTimeout(timeout);
       if (session?.user) {
         setUser(session.user);
-        const { data } = await supabase
-          .from("usuarios")
-          .select("*")
-          .eq("id", session.user.id)
-          .single();
-        setPerfil(data);
+        cargarPerfil(session.user.id);
+      } else {
+        setUser(null);
+        setPerfil(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     const {
@@ -27,20 +46,18 @@ export function AuthProvider({ children }) {
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
         setUser(session.user);
-        const { data } = await supabase
-          .from("usuarios")
-          .select("*")
-          .eq("id", session.user.id)
-          .single();
-        setPerfil(data);
+        cargarPerfil(session.user.id);
       } else {
         setUser(null);
         setPerfil(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   async function login(email, password) {

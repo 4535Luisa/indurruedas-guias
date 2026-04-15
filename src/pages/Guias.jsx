@@ -4,7 +4,6 @@ import { supabase, normalizarEstadoTCC } from "../lib/supabase";
 import {
   PillEstado,
   PillTransportadora,
-  DiasActiva,
   PageHeader,
   Btn,
   Table,
@@ -12,6 +11,7 @@ import {
   Td,
 } from "../components/UI";
 import DetalleGuia from "../components/DetalleGuia";
+import AsignarCliente from "../components/AsignarCliente";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 
@@ -21,7 +21,6 @@ const MAPEO_ESTELAR = {
   cumplido: "entregado",
   entregado: "entregado",
   "en transito": "en_transito",
-  "en tránsito": "en_transito",
   novedad: "novedad",
   "con novedad": "novedad",
   devuelto: "novedad",
@@ -62,6 +61,92 @@ function parsearFechaTCC(str) {
   return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
 }
 
+function BarraProgreso({ progreso }) {
+  if (!progreso.activo) return null;
+  const pct =
+    progreso.total > 0
+      ? Math.round((progreso.actual / progreso.total) * 100)
+      : 0;
+  return (
+    <div
+      style={{
+        background: "var(--blk2)",
+        border: "1px solid var(--blk4)",
+        borderRadius: "10px",
+        padding: "16px",
+        marginBottom: "16px",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: "8px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div
+            style={{
+              width: "8px",
+              height: "8px",
+              borderRadius: "50%",
+              background: "var(--m)",
+            }}
+          ></div>
+          <span
+            style={{ fontSize: "12px", fontWeight: "500", color: "var(--wht)" }}
+          >
+            Cargando {progreso.trans}
+          </span>
+        </div>
+        <span
+          style={{
+            fontSize: "16px",
+            fontWeight: "700",
+            fontFamily: "var(--font-mono)",
+            color: "var(--m)",
+          }}
+        >
+          {pct}%
+        </span>
+      </div>
+      <div
+        style={{
+          height: "8px",
+          background: "var(--blk3)",
+          borderRadius: "4px",
+          overflow: "hidden",
+          marginBottom: "8px",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            width: `${pct}%`,
+            background: "var(--m)",
+            borderRadius: "4px",
+            transition: "width 0.3s ease",
+          }}
+        />
+      </div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: "11px",
+          color: "var(--gray)",
+        }}
+      >
+        <span>{progreso.texto}</span>
+        <span style={{ fontFamily: "var(--font-mono)" }}>
+          {progreso.actual} / {progreso.total}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function Guias() {
   const [guias, setGuias] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -76,7 +161,15 @@ export default function Guias() {
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [guiaDetalle, setGuiaDetalle] = useState(null);
+  const [guiaAsignar, setGuiaAsignar] = useState(null);
   const [exportando, setExportando] = useState(false);
+  const [progreso, setProgreso] = useState({
+    activo: false,
+    actual: 0,
+    total: 0,
+    texto: "",
+    trans: "",
+  });
   const fileEstelarRef = useRef();
   const fileTccRef = useRef();
 
@@ -107,45 +200,51 @@ export default function Guias() {
     setLoading(true);
     const desde = (pagina - 1) * POR_PAGINA;
     const hasta = desde + POR_PAGINA - 1;
-
     let q = supabase
       .from("guias")
       .select(
-        `id, numero_guia, transportadora, factura_indurruedas, estado,
-        fecha_guia, ciudad_destino, direccion_entrega, destinatario,
-        clientes(id, nombre, nit, asesor_id, usuarios(id, nombre))`,
+        "id, numero_guia, transportadora, factura_indurruedas, estado, fecha_guia, ciudad_destino, direccion_entrega, destinatario, clientes(id, nombre, nit, asesor_id, usuarios(id, nombre))",
         { count: "exact" },
       )
       .order("created_at", { ascending: false })
       .range(desde, hasta);
-
     if (busqueda)
       q = q.or(
         `numero_guia.ilike.%${busqueda}%,factura_indurruedas.ilike.%${busqueda}%,destinatario.ilike.%${busqueda}%,ciudad_destino.ilike.%${busqueda}%`,
       );
     if (filtroTransp) q = q.eq("transportadora", filtroTransp);
     if (filtroEstado) q = q.eq("estado", filtroEstado);
-
     const { data, count } = await q;
     let resultado = data || [];
-    if (filtroAsesor)
+    if (filtroAsesor === "sin_asesor") {
+      resultado = resultado.filter((g) => !g.clientes?.usuarios);
+    } else if (filtroAsesor) {
       resultado = resultado.filter(
         (g) => g.clientes?.usuarios?.id === filtroAsesor,
       );
-
+    }
     setGuias(resultado);
     setTotal(count || 0);
     setLoading(false);
   }
 
-  async function buscarCliente(nit, nombre) {
+  // Cache de clientes para evitar consultas repetidas
+  const clienteCache = useRef({});
+
+  async function buscarClienteConCache(nit, nombre) {
+    const key = nit || nombre;
+    if (clienteCache.current[key]) return clienteCache.current[key];
+
     if (nit && nit !== "nan" && String(nit).length > 3) {
       const { data } = await supabase
         .from("clientes")
         .select("id")
         .eq("nit", String(nit).trim())
         .limit(1);
-      if (data?.[0]) return data[0].id;
+      if (data?.[0]) {
+        clienteCache.current[key] = data[0].id;
+        return data[0].id;
+      }
     }
     if (nombre) {
       const palabras = String(nombre).trim().split(" ").slice(0, 2).join(" ");
@@ -154,7 +253,10 @@ export default function Guias() {
         .select("id")
         .ilike("nombre", `%${palabras}%`)
         .limit(1);
-      if (data?.[0]) return data[0].id;
+      if (data?.[0]) {
+        clienteCache.current[key] = data[0].id;
+        return data[0].id;
+      }
     }
     return null;
   }
@@ -164,19 +266,51 @@ export default function Guias() {
     if (!file) return;
     setUploading(true);
     setUploadResult(null);
+    clienteCache.current = {};
     let nuevas = 0,
       actualizadas = 0,
       errores = 0;
+
     try {
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer);
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {
-        defval: "",
+      const rows = XLSX.utils
+        .sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" })
+        .filter((r) => String(r["GUIA"] || "").trim());
+
+      setProgreso({
+        activo: true,
+        actual: 0,
+        total: rows.length,
+        texto: "Verificando guias existentes...",
+        trans: "Estelar Express",
       });
 
-      for (const row of rows) {
+      // 1. Obtener todas las guias existentes de una sola vez
+      const numerosGuia = rows.map((r) => String(r["GUIA"]).trim());
+      const { data: existentes } = await supabase
+        .from("guias")
+        .select("id, numero_guia, estado, factura_indurruedas")
+        .in("numero_guia", numerosGuia);
+      const existentesMap = {};
+      (existentes || []).forEach((g) => {
+        existentesMap[g.numero_guia] = g;
+      });
+
+      setProgreso((p) => ({ ...p, texto: "Procesando guias..." }));
+
+      const porInsertar = [];
+      const porActualizar = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        setProgreso((p) => ({
+          ...p,
+          actual: i + 1,
+          texto: `Preparando ${i + 1} de ${rows.length}...`,
+        }));
+
         const numeroGuia = String(row["GUIA"] || "").trim();
-        if (!numeroGuia) continue;
         const estado = normalizarEstadoEstelar(String(row["ESTADO"] || ""));
         const factura = extraerFacturaEstelar(row["ANEXOS"]);
         const fechaGuia = parsearFechaEstelar(row["DIA AFORO"]);
@@ -188,46 +322,77 @@ export default function Guias() {
         const nit = String(row["DOCUMENTO DESTINATARIO"] || "").trim();
         const ciudad = String(row["CIUDAD DESTINO"] || "").trim();
         const direccion = String(row["DIRECCION DESTINO"] || "").trim();
-        const clienteId = await buscarCliente(nit, destinatario);
+        const clienteId = await buscarClienteConCache(nit, destinatario);
 
-        const { data: existing } = await supabase
-          .from("guias")
-          .select("id, estado")
-          .eq("numero_guia", numeroGuia)
-          .maybeSingle();
-        if (existing) {
-          await supabase
-            .from("guias")
-            .update({
-              estado,
-              factura_indurruedas: factura || existing.factura_indurruedas,
-              fecha_entrega: fechaEntrega,
-              dias_habiles: diasEntrega,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", existing.id);
-          actualizadas++;
+        if (existentesMap[numeroGuia]) {
+          porActualizar.push({
+            id: existentesMap[numeroGuia].id,
+            estado,
+            factura_indurruedas:
+              factura || existentesMap[numeroGuia].factura_indurruedas,
+            fecha_entrega: fechaEntrega,
+            dias_habiles: diasEntrega,
+          });
         } else {
-          const { error } = await supabase
-            .from("guias")
-            .insert({
-              numero_guia: numeroGuia,
-              transportadora: "estelar",
-              factura_indurruedas: factura,
-              estado,
-              cliente_id: clienteId,
-              destinatario,
-              direccion_entrega: direccion,
-              ciudad_destino: ciudad,
-              fecha_guia: fechaGuia,
-              fecha_entrega: fechaEntrega,
-              dias_habiles: diasEntrega,
-              activa: estado !== "entregado",
-            });
-          if (!error) nuevas++;
-          else errores++;
+          porInsertar.push({
+            numero_guia: numeroGuia,
+            transportadora: "estelar",
+            factura_indurruedas: factura,
+            estado,
+            cliente_id: clienteId,
+            destinatario,
+            direccion_entrega: direccion,
+            ciudad_destino: ciudad,
+            fecha_guia: fechaGuia,
+            fecha_entrega: fechaEntrega,
+            dias_habiles: diasEntrega,
+            activa: estado !== "entregado",
+          });
         }
       }
+
+      // 2. Insertar en lotes de 50
+      setProgreso((p) => ({
+        ...p,
+        texto: "Insertando guias nuevas...",
+        actual: 0,
+        total: porInsertar.length,
+      }));
+      const LOTE = 50;
+      for (let i = 0; i < porInsertar.length; i += LOTE) {
+        const lote = porInsertar.slice(i, i + LOTE);
+        const { error } = await supabase.from("guias").insert(lote);
+        if (!error) nuevas += lote.length;
+        else errores += lote.length;
+        setProgreso((p) => ({
+          ...p,
+          actual: Math.min(i + LOTE, porInsertar.length),
+        }));
+      }
+
+      // 3. Actualizar en lotes de 50
+      setProgreso((p) => ({
+        ...p,
+        texto: "Actualizando estados...",
+        actual: 0,
+        total: porActualizar.length,
+      }));
+      for (let i = 0; i < porActualizar.length; i += LOTE) {
+        const lote = porActualizar.slice(i, i + LOTE);
+        for (const g of lote) {
+          const { id, ...datos } = g;
+          await supabase
+            .from("guias")
+            .update({ ...datos, updated_at: new Date().toISOString() })
+            .eq("id", id);
+          actualizadas++;
+        }
+        setProgreso((p) => ({
+          ...p,
+          actual: Math.min(i + LOTE, porActualizar.length),
+        }));
+      }
+
       await supabase
         .from("sync_log")
         .insert({
@@ -249,6 +414,7 @@ export default function Guias() {
       setUploadResult({ error: "Error Estelar: " + err.message });
     }
     setUploading(false);
+    setProgreso({ activo: false, actual: 0, total: 0, texto: "", trans: "" });
     fileEstelarRef.current.value = "";
   }
 
@@ -257,19 +423,50 @@ export default function Guias() {
     if (!file) return;
     setUploading(true);
     setUploadResult(null);
+    clienteCache.current = {};
     let nuevas = 0,
       actualizadas = 0,
       errores = 0;
+
     try {
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer);
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {
-        defval: "",
+      const rows = XLSX.utils
+        .sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" })
+        .filter((r) => String(r["Nro. de Remision TCC"] || "").trim());
+
+      setProgreso({
+        activo: true,
+        actual: 0,
+        total: rows.length,
+        texto: "Verificando guias existentes...",
+        trans: "TCC",
       });
 
-      for (const row of rows) {
+      const numerosGuia = rows.map((r) =>
+        String(r["Nro. de Remision TCC"]).trim(),
+      );
+      const { data: existentes } = await supabase
+        .from("guias")
+        .select("id, numero_guia, estado")
+        .in("numero_guia", numerosGuia);
+      const existentesMap = {};
+      (existentes || []).forEach((g) => {
+        existentesMap[g.numero_guia] = g;
+      });
+
+      const porInsertar = [];
+      const porActualizar = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        setProgreso((p) => ({
+          ...p,
+          actual: i + 1,
+          texto: `Preparando ${i + 1} de ${rows.length}...`,
+        }));
+
         const numeroGuia = String(row["Nro. de Remision TCC"] || "").trim();
-        if (!numeroGuia) continue;
         const factura = String(row["Documento Cliente"] || "").trim() || null;
         const fechaGuia = parsearFechaTCC(row["Fecha(dd/mm/aaaa)"]);
         const estado = normalizarEstadoTCC(
@@ -281,45 +478,73 @@ export default function Guias() {
           .split("-")[0]
           .trim();
         const diasHabiles = parseInt(row["Dias de entrega (habiles)"]) || null;
-        const clienteId = await buscarCliente(null, destinatario);
+        const clienteId = await buscarClienteConCache(null, destinatario);
 
-        const { data: existing } = await supabase
-          .from("guias")
-          .select("id, estado")
-          .eq("numero_guia", numeroGuia)
-          .maybeSingle();
-        if (existing) {
-          if (existing.estado !== estado) {
-            await supabase
-              .from("guias")
-              .update({
-                estado,
-                dias_habiles: diasHabiles,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", existing.id);
-            actualizadas++;
+        if (existentesMap[numeroGuia]) {
+          if (existentesMap[numeroGuia].estado !== estado) {
+            porActualizar.push({
+              id: existentesMap[numeroGuia].id,
+              estado,
+              dias_habiles: diasHabiles,
+            });
           }
         } else {
-          const { error } = await supabase
-            .from("guias")
-            .insert({
-              numero_guia: numeroGuia,
-              transportadora: "tcc",
-              factura_indurruedas: factura,
-              estado,
-              cliente_id: clienteId,
-              destinatario,
-              direccion_entrega: direccion,
-              ciudad_destino: destino,
-              fecha_guia: fechaGuia,
-              dias_habiles: diasHabiles,
-              activa: estado !== "entregado",
-            });
-          if (!error) nuevas++;
-          else errores++;
+          porInsertar.push({
+            numero_guia: numeroGuia,
+            transportadora: "tcc",
+            factura_indurruedas: factura,
+            estado,
+            cliente_id: clienteId,
+            destinatario,
+            direccion_entrega: direccion,
+            ciudad_destino: destino,
+            fecha_guia: fechaGuia,
+            dias_habiles: diasHabiles,
+            activa: estado !== "entregado",
+          });
         }
       }
+
+      setProgreso((p) => ({
+        ...p,
+        texto: "Insertando guias nuevas...",
+        actual: 0,
+        total: porInsertar.length,
+      }));
+      const LOTE = 50;
+      for (let i = 0; i < porInsertar.length; i += LOTE) {
+        const lote = porInsertar.slice(i, i + LOTE);
+        const { error } = await supabase.from("guias").insert(lote);
+        if (!error) nuevas += lote.length;
+        else errores += lote.length;
+        setProgreso((p) => ({
+          ...p,
+          actual: Math.min(i + LOTE, porInsertar.length),
+        }));
+      }
+
+      setProgreso((p) => ({
+        ...p,
+        texto: "Actualizando estados...",
+        actual: 0,
+        total: porActualizar.length,
+      }));
+      for (let i = 0; i < porActualizar.length; i += LOTE) {
+        const lote = porActualizar.slice(i, i + LOTE);
+        for (const g of lote) {
+          const { id, ...datos } = g;
+          await supabase
+            .from("guias")
+            .update({ ...datos, updated_at: new Date().toISOString() })
+            .eq("id", id);
+          actualizadas++;
+        }
+        setProgreso((p) => ({
+          ...p,
+          actual: Math.min(i + LOTE, porActualizar.length),
+        }));
+      }
+
       await supabase
         .from("sync_log")
         .insert({
@@ -341,6 +566,7 @@ export default function Guias() {
       setUploadResult({ error: "Error TCC: " + err.message });
     }
     setUploading(false);
+    setProgreso({ activo: false, actual: 0, total: 0, texto: "", trans: "" });
     fileTccRef.current.value = "";
   }
 
@@ -349,7 +575,7 @@ export default function Guias() {
     let q = supabase
       .from("guias")
       .select(
-        `numero_guia, transportadora, factura_indurruedas, estado, fecha_guia, ciudad_destino, direccion_entrega, destinatario, clientes(nombre, nit, usuarios(nombre))`,
+        "numero_guia, transportadora, factura_indurruedas, estado, fecha_guia, ciudad_destino, direccion_entrega, destinatario, clientes(nombre, nit, usuarios(nombre))",
       )
       .order("created_at", { ascending: false })
       .limit(5000);
@@ -359,15 +585,13 @@ export default function Guias() {
       q = q.or(
         `numero_guia.ilike.%${busqueda}%,destinatario.ilike.%${busqueda}%`,
       );
-
     const { data } = await q;
     if (!data) {
       setExportando(false);
       return;
     }
-
     const rows = data.map((g) => ({
-      "N° Guía": g.numero_guia,
+      "N Guia": g.numero_guia,
       Transportadora:
         g.transportadora === "estelar" ? "Estelar Express" : "TCC",
       Factura: g.factura_indurruedas || "",
@@ -375,21 +599,16 @@ export default function Guias() {
       NIT: g.clientes?.nit || "",
       Asesor: g.clientes?.usuarios?.nombre || "",
       Ciudad: g.ciudad_destino || "",
-      Dirección: g.direccion_entrega || "",
-      "Fecha guía": g.fecha_guia || "",
-      "Días activa": g.fecha_guia
+      Direccion: g.direccion_entrega || "",
+      Fecha: g.fecha_guia || "",
+      "Dias activa": g.fecha_guia
         ? Math.floor((new Date() - new Date(g.fecha_guia)) / 86400000)
         : "",
       Estado: g.estado,
     }));
-
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(rows);
-    XLSX.utils.book_append_sheet(wb, ws, "Guías");
-    XLSX.writeFile(
-      wb,
-      `guias_indurruedas_${new Date().toISOString().split("T")[0]}.xlsx`,
-    );
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Guias");
+    XLSX.writeFile(wb, `guias_${new Date().toISOString().split("T")[0]}.xlsx`);
     setExportando(false);
   }
 
@@ -408,20 +627,20 @@ export default function Guias() {
   return (
     <div>
       <PageHeader
-        title="Guías de envío"
-        subtitle={`${total.toLocaleString()} guías · página ${pagina} de ${Math.max(1, totalPaginas)}`}
+        title="Guias de envio"
+        subtitle={`${total.toLocaleString()} guias - pagina ${pagina} de ${Math.max(1, totalPaginas)}`}
       >
-        <Btn onClick={exportarExcel} disabled={exportando}>
-          {exportando ? "Exportando..." : "↓ Exportar Excel"}
+        <Btn onClick={exportarExcel} disabled={exportando || uploading}>
+          {exportando ? "Exportando..." : "Exportar Excel"}
         </Btn>
         <Btn
           onClick={() => fileEstelarRef.current.click()}
           disabled={uploading}
         >
-          {uploading ? "Procesando..." : "↑ Excel Estelar"}
+          {uploading ? "Procesando..." : "Excel Estelar"}
         </Btn>
         <Btn onClick={() => fileTccRef.current.click()} disabled={uploading}>
-          {uploading ? "Procesando..." : "↑ Excel TCC"}
+          {uploading ? "Procesando..." : "Excel TCC"}
         </Btn>
         <input
           ref={fileEstelarRef}
@@ -439,7 +658,9 @@ export default function Guias() {
         />
       </PageHeader>
 
-      {uploadResult && (
+      <BarraProgreso progreso={progreso} />
+
+      {uploadResult && !progreso.activo && (
         <div
           style={{
             background: uploadResult.error ? "#2a0000" : "#0d1f00",
@@ -451,9 +672,8 @@ export default function Guias() {
             color: uploadResult.error ? "var(--danger)" : "var(--m)",
           }}
         >
-          {uploadResult.error
-            ? uploadResult.error
-            : `✓ ${uploadResult.trans} — ${uploadResult.nuevas} nuevas · ${uploadResult.actualizadas} actualizadas · ${uploadResult.errores} errores · ${uploadResult.total} filas`}
+          {uploadResult.error ||
+            `${uploadResult.trans} - ${uploadResult.nuevas} nuevas - ${uploadResult.actualizadas} actualizadas - ${uploadResult.errores} errores`}
           <button
             onClick={() => setUploadResult(null)}
             style={{
@@ -465,7 +685,7 @@ export default function Guias() {
               fontSize: "16px",
             }}
           >
-            ×
+            x
           </button>
         </div>
       )}
@@ -481,7 +701,7 @@ export default function Guias() {
         <input
           value={filtroTexto}
           onChange={(e) => setFiltroTexto(e.target.value)}
-          placeholder="Buscar guía, factura, cliente, ciudad..."
+          placeholder="Buscar guia, factura, cliente, ciudad..."
           style={{ flex: 1, minWidth: "200px" }}
         />
         <select
@@ -505,7 +725,7 @@ export default function Guias() {
           style={{ minWidth: "160px" }}
         >
           <option value="">Todos los estados</option>
-          <option value="en_transito">En tránsito</option>
+          <option value="en_transito">En transito</option>
           <option value="entregado">Entregado</option>
           <option value="pendiente">Pendiente recogida</option>
           <option value="novedad">Con novedad</option>
@@ -521,6 +741,7 @@ export default function Guias() {
           style={{ minWidth: "180px" }}
         >
           <option value="">Todos los asesores</option>
+          <option value="sin_asesor">Sin asesor asignado</option>
           {asesores.map((a) => (
             <option key={a.id} value={a.id}>
               {a.nombre}
@@ -537,7 +758,7 @@ export default function Guias() {
             fontSize: "12px",
           }}
         >
-          Cargando guías...
+          Cargando guias...
         </div>
       ) : (
         <>
@@ -552,14 +773,14 @@ export default function Guias() {
             <Table>
               <thead>
                 <tr>
-                  <Th>N° Guía</Th>
+                  <Th>N Guia</Th>
                   <Th>Transp.</Th>
                   <Th>Factura</Th>
                   <Th>Cliente</Th>
                   <Th>Ciudad</Th>
                   <Th>Asesor</Th>
                   <Th>Fecha</Th>
-                  <Th>Días</Th>
+                  <Th>Dias</Th>
                   <Th>Estado</Th>
                   <Th>Actualizar</Th>
                 </tr>
@@ -605,16 +826,46 @@ export default function Guias() {
                           color: "var(--gray)",
                         }}
                       >
-                        {g.factura_indurruedas || "—"}
+                        {g.factura_indurruedas || "-"}
                       </Td>
                       <Td style={{ color: "var(--wht)" }}>
-                        {g.clientes?.nombre || g.destinatario || "—"}
+                        {g.clientes?.nombre ? (
+                          g.clientes.nombre
+                        ) : (
+                          <span
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                            }}
+                          >
+                            <span
+                              style={{ color: "var(--gray)", fontSize: "11px" }}
+                            >
+                              {g.destinatario || "-"}
+                            </span>
+                            <button
+                              onClick={() => setGuiaAsignar(g)}
+                              style={{
+                                fontSize: "9px",
+                                padding: "2px 6px",
+                                border: "1px solid var(--m)",
+                                borderRadius: "4px",
+                                background: "transparent",
+                                color: "var(--m)",
+                                cursor: "pointer",
+                              }}
+                            >
+                              Asignar
+                            </button>
+                          </span>
+                        )}
                       </Td>
                       <Td style={{ whiteSpace: "nowrap" }}>
-                        {g.ciudad_destino || "—"}
+                        {g.ciudad_destino || "-"}
                       </Td>
                       <Td style={{ color: "var(--gray)", fontSize: "11px" }}>
-                        {g.clientes?.usuarios?.nombre || "—"}
+                        {g.clientes?.usuarios?.nombre || "-"}
                       </Td>
                       <Td
                         style={{
@@ -627,7 +878,7 @@ export default function Guias() {
                           ? format(parseISO(g.fecha_guia), "d MMM yy", {
                               locale: es,
                             })
-                          : "—"}
+                          : "-"}
                       </Td>
                       <Td>
                         <span
@@ -661,7 +912,7 @@ export default function Guias() {
                             minWidth: "110px",
                           }}
                         >
-                          <option value="en_transito">En tránsito</option>
+                          <option value="en_transito">En transito</option>
                           <option value="entregado">Entregado</option>
                           <option value="pendiente">Pendiente</option>
                           <option value="novedad">Con novedad</option>
@@ -683,7 +934,7 @@ export default function Guias() {
                   fontSize: "12px",
                 }}
               >
-                No se encontraron guías
+                No se encontraron guias
               </div>
             )}
           </div>
@@ -699,9 +950,9 @@ export default function Guias() {
             }}
           >
             <span style={{ fontSize: "11px", color: "var(--gray)" }}>
-              Mostrando {Math.min((pagina - 1) * POR_PAGINA + 1, total)}–
+              Mostrando {Math.min((pagina - 1) * POR_PAGINA + 1, total)}-
               {Math.min(pagina * POR_PAGINA, total)} de {total.toLocaleString()}{" "}
-              guías
+              guias
             </span>
             <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
               <Btn onClick={() => setPagina(1)} disabled={pagina === 1}>
@@ -711,7 +962,7 @@ export default function Guias() {
                 onClick={() => setPagina((p) => p - 1)}
                 disabled={pagina === 1}
               >
-                ‹ Ant
+                Ant
               </Btn>
               {Array.from({ length: Math.min(5, totalPaginas) }, (_, i) => {
                 let p;
@@ -745,7 +996,7 @@ export default function Guias() {
                 onClick={() => setPagina((p) => p + 1)}
                 disabled={pagina >= totalPaginas}
               >
-                Sig ›
+                Sig
               </Btn>
               <Btn
                 onClick={() => setPagina(totalPaginas)}
@@ -760,6 +1011,13 @@ export default function Guias() {
 
       {guiaDetalle && (
         <DetalleGuia guia={guiaDetalle} onClose={() => setGuiaDetalle(null)} />
+      )}
+      {guiaAsignar && (
+        <AsignarCliente
+          guia={guiaAsignar}
+          onClose={() => setGuiaAsignar(null)}
+          onAsignado={() => cargarGuias()}
+        />
       )}
     </div>
   );
