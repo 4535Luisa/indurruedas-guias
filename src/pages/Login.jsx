@@ -38,7 +38,7 @@ export default function Login() {
             src="/logo-macho.png"
             alt="MACHO"
             style={{
-              height: "48px",
+              height: "36px",
               objectFit: "contain",
               margin: "0 auto 14px",
               display: "block",

@@ -73,11 +73,23 @@ export default function Layout() {
               marginBottom: "10px",
             }}
           >
-            <img
-              src="/logo-macho.png"
-              alt="MACHO"
-              style={{ height: "32px", objectFit: "contain" }}
-            />
+            <div
+              style={{
+                width: "36px",
+                height: "36px",
+                background: "var(--m)",
+                borderRadius: "8px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "14px",
+                fontWeight: "700",
+                color: theme === "dark" ? "#0E0E0E" : "#FFFFFF",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              M
+            </div>
             <button
               onClick={toggleTheme}
               title={theme === "dark" ? "Modo claro" : "Modo oscuro"}
