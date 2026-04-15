@@ -1,6 +1,10 @@
 import { useEffect, useState, useRef } from "react";
 import * as XLSX from "xlsx";
-import { supabase, normalizarEstadoTCC } from "../lib/supabase";
+import {
+  supabase,
+  normalizarEstadoTCC,
+  normalizarEstadoEstelar,
+} from "../lib/supabase";
 import {
   PillEstado,
   PillTransportadora,
@@ -16,35 +20,6 @@ import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 
 const POR_PAGINA = 50;
-
-const MAPEO_ESTELAR = {
-  aforada: "aforada",
-  aforado: "aforada",
-  despachada: "despachada",
-  despachado: "despachada",
-  muellex: "en_muellex",
-  "transito nacional": "en_transito",
-  transito: "en_transito",
-  "reparto urbano": "en_reparto",
-  reparto: "en_reparto",
-  "recibido en destino": "recibido",
-  recibido: "recibido",
-  cumplido: "entregado",
-  entregado: "entregado",
-  entregada: "entregado",
-  novedad: "novedad",
-  devuelto: "novedad",
-  devolucion: "novedad",
-};
-
-function normalizarEstadoEstelar(raw) {
-  if (!raw) return "en_transito";
-  const lower = raw.toLowerCase().trim();
-  for (const [k, v] of Object.entries(MAPEO_ESTELAR)) {
-    if (lower.includes(k)) return v;
-  }
-  return "en_transito";
-}
 
 function extraerFacturaEstelar(anexos) {
   if (!anexos) return null;
@@ -734,15 +709,10 @@ export default function Guias() {
           style={{ minWidth: "160px" }}
         >
           <option value="">Todos los estados</option>
-          <option value="aforada">Aforada</option>
-          <option value="despachada">Despachada</option>
-          <option value="en_muellex">En muellex</option>
-          <option value="en_transito">En transito</option>
-          <option value="en_reparto">En reparto urbano</option>
-          <option value="recibido">Recibido en destino</option>
+          <option value="en_transito">En tránsito</option>
           <option value="entregado">Entregado</option>
+          <option value="pendiente">Pendiente recogida</option>
           <option value="novedad">Con novedad</option>
-          <option value="pendiente">Pendiente recogida (TCC)</option>
           <option value="informada">Informada TCC</option>
           <option value="no_despachada">No despachada</option>
         </select>
@@ -926,15 +896,10 @@ export default function Guias() {
                             minWidth: "130px",
                           }}
                         >
-                          <option value="aforada">Aforada</option>
-                          <option value="despachada">Despachada</option>
-                          <option value="en_muellex">En muellex</option>
-                          <option value="en_transito">En transito</option>
-                          <option value="en_reparto">En reparto urbano</option>
-                          <option value="recibido">Recibido en destino</option>
+                          <option value="en_transito">En tránsito</option>
                           <option value="entregado">Entregado</option>
+                          <option value="pendiente">Pendiente recogida</option>
                           <option value="novedad">Con novedad</option>
-                          <option value="pendiente">Pendiente (TCC)</option>
                           <option value="informada">Informada TCC</option>
                           <option value="no_despachada">No despachada</option>
                         </select>

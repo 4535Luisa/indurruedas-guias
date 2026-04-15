@@ -246,15 +246,10 @@ export default function AsesorGuias() {
             style={{ minWidth: "160px" }}
           >
             <option value="">Todos los estados</option>
-            <option value="aforada">Aforada</option>
-            <option value="despachada">Despachada</option>
-            <option value="en_muellex">En muellex</option>
-            <option value="en_transito">En transito</option>
-            <option value="en_reparto">En reparto urbano</option>
-            <option value="recibido">Recibido en destino</option>
+            <option value="en_transito">En tránsito</option>
             <option value="entregado">Entregado</option>
+            <option value="pendiente">Pendiente recogida</option>
             <option value="novedad">Con novedad</option>
-            <option value="pendiente">Pendiente recogida (TCC)</option>
             <option value="informada">Informada TCC</option>
             <option value="no_despachada">No despachada</option>
           </select>

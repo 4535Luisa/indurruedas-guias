@@ -1,108 +1,39 @@
 import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabase";
+import { supabase, ESTADOS } from "../lib/supabase";
 import { PillTransportadora } from "./UI";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 
-const INFO_ESTADOS = {
-  aforada: {
-    label: "Mercancia aforada",
-    color: "#55AAFF",
-    bg: "#001a33",
-    border: "#003366",
-    icono: "📦",
-    descripcion:
-      "La mercancia fue recibida y registrada en la oficina de origen. Esta siendo preparada para despacho.",
-  },
-  despachada: {
-    label: "Mercancia despachada",
-    color: "#55AAFF",
-    bg: "#001a33",
-    border: "#003366",
-    icono: "🚚",
-    descripcion:
-      "La mercancia salio de la oficina de origen y esta en camino hacia su destino.",
-  },
-  en_muellex: {
-    label: "Mercancia en muellex",
-    color: "#AA88FF",
-    bg: "#1a0033",
-    border: "#2a0055",
-    icono: "🏭",
-    descripcion:
-      "La mercancia se encuentra en el centro de distribucion (muellex) siendo clasificada para continuar su ruta.",
-  },
+const DESCRIPCIONES = {
   en_transito: {
-    label: "En transito nacional",
-    color: "#55AAFF",
-    bg: "#001a33",
-    border: "#003366",
-    icono: "🛣️",
-    descripcion:
-      "La mercancia esta viajando entre ciudades hacia el destino final del cliente.",
-  },
-  en_reparto: {
-    label: "En reparto urbano",
-    color: "#FFAA00",
-    bg: "#2a1800",
-    border: "#3d2400",
-    icono: "🏍️",
-    descripcion:
-      "La mercancia ya llego a la ciudad destino y esta siendo repartida. Deberia llegar hoy o manana.",
-  },
-  recibido: {
-    label: "Recibido en destino",
-    color: "#FFAA00",
-    bg: "#2a1800",
-    border: "#3d2400",
-    icono: "📬",
-    descripcion:
-      "La mercancia fue recibida en la oficina de destino. El cliente debe ir a recogerla o esta pendiente de entrega a domicilio.",
+    icono: "🚚",
+    texto:
+      "La mercancía está en camino hacia el destino. Puede estar en tránsito nacional, en bodega intermedia o en proceso de entrega.",
   },
   entregado: {
-    label: "Entregado",
-    color: "#AAFF00",
-    bg: "#0d1f00",
-    border: "#1a3300",
     icono: "✅",
-    descripcion:
-      "La mercancia fue entregada exitosamente al cliente en su direccion. Envio completado.",
-  },
-  novedad: {
-    label: "Con novedad",
-    color: "#FF4444",
-    bg: "#2a0000",
-    border: "#440000",
-    icono: "⚠️",
-    descripcion:
-      "Se presento un problema con la entrega. Puede ser que el cliente no estuviera, direccion incorrecta u otro inconveniente. Contactar al cliente.",
+    texto:
+      "La mercancía fue entregada exitosamente al cliente. Envío completado.",
   },
   pendiente: {
-    label: "Pendiente recogida",
-    color: "#FFAA00",
-    bg: "#2a1800",
-    border: "#3d2400",
     icono: "🕐",
-    descripcion:
-      "La mercancia esta esperando ser recogida por el cliente en la oficina de TCC mas cercana.",
+    texto:
+      "La mercancía está esperando ser recogida por el cliente en la oficina de TCC más cercana.",
+  },
+  novedad: {
+    icono: "⚠️",
+    texto:
+      "Se presentó un problema con la entrega. Puede ser dirección incorrecta, cliente ausente u otro inconveniente. Contactar al cliente.",
   },
   informada: {
-    label: "Informada a TCC",
-    color: "#888888",
-    bg: "#1a1a1a",
-    border: "#2e2e2e",
     icono: "📋",
-    descripcion:
-      "La guia fue registrada en el sistema de TCC pero aun no ha sido recogida en origen.",
+    texto:
+      "La guía fue registrada en TCC pero aún no ha sido recogida en el origen para despacho.",
   },
   no_despachada: {
-    label: "No despachada",
-    color: "#FF8800",
-    bg: "#2a1200",
-    border: "#3d1a00",
     icono: "🚫",
-    descripcion:
-      "La mercancia no fue enviada por el remitente. Verificar con el equipo de despacho de Indurruedas.",
+    texto:
+      "La mercancía no fue enviada por el remitente. Verificar con el equipo de despacho de Indurruedas.",
   },
 };
 
@@ -128,7 +59,8 @@ export default function DetalleGuia({ guia, onClose }) {
   const dias = guia.fecha_guia
     ? Math.floor((new Date() - new Date(guia.fecha_guia)) / 86400000)
     : 0;
-  const infoEstado = INFO_ESTADOS[guia.estado] || INFO_ESTADOS["en_transito"];
+  const cfg = ESTADOS[guia.estado] || ESTADOS["en_transito"];
+  const desc = DESCRIPCIONES[guia.estado] || DESCRIPCIONES["en_transito"];
 
   return (
     <div
@@ -156,7 +88,6 @@ export default function DetalleGuia({ guia, onClose }) {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div
           style={{
             padding: "16px 20px",
@@ -201,12 +132,12 @@ export default function DetalleGuia({ guia, onClose }) {
           </button>
         </div>
 
-        {/* Estado destacado */}
+        {/* Estado con descripcion */}
         <div
           style={{
             margin: "16px 20px",
-            background: infoEstado.bg,
-            border: `1px solid ${infoEstado.border}`,
+            background: cfg.bg,
+            border: `1px solid ${cfg.border}`,
             borderRadius: "10px",
             padding: "14px 16px",
           }}
@@ -219,16 +150,16 @@ export default function DetalleGuia({ guia, onClose }) {
               marginBottom: "8px",
             }}
           >
-            <span style={{ fontSize: "22px" }}>{infoEstado.icono}</span>
+            <span style={{ fontSize: "22px" }}>{desc.icono}</span>
             <div>
               <div
                 style={{
                   fontSize: "13px",
                   fontWeight: "500",
-                  color: infoEstado.color,
+                  color: cfg.color,
                 }}
               >
-                {infoEstado.label}
+                {cfg.label}
               </div>
               <div
                 style={{
@@ -237,7 +168,7 @@ export default function DetalleGuia({ guia, onClose }) {
                   marginTop: "1px",
                 }}
               >
-                Estado actual de la guia
+                Estado actual de la guía
               </div>
             </div>
           </div>
@@ -249,11 +180,11 @@ export default function DetalleGuia({ guia, onClose }) {
               margin: 0,
             }}
           >
-            {infoEstado.descripcion}
+            {desc.texto}
           </p>
         </div>
 
-        {/* Info de la guia */}
+        {/* Info */}
         <div
           style={{
             padding: "0 20px 16px",
@@ -277,9 +208,9 @@ export default function DetalleGuia({ guia, onClose }) {
                 value: guia.factura_indurruedas || "—",
               },
               { label: "Ciudad destino", value: guia.ciudad_destino || "—" },
-              { label: "Direccion", value: guia.direccion_entrega || "—" },
+              { label: "Dirección", value: guia.direccion_entrega || "—" },
               {
-                label: "Fecha generacion",
+                label: "Fecha generación",
                 value: guia.fecha_guia
                   ? format(parseISO(guia.fecha_guia), "d MMM yyyy", {
                       locale: es,
@@ -287,8 +218,8 @@ export default function DetalleGuia({ guia, onClose }) {
                   : "—",
               },
               {
-                label: "Dias activa",
-                value: `${dias} dias`,
+                label: "Días activa",
+                value: `${dias} días`,
                 color:
                   dias >= 10
                     ? "var(--danger)"
@@ -347,15 +278,15 @@ export default function DetalleGuia({ guia, onClose }) {
             </div>
           ) : historial.length === 0 ? (
             <div style={{ fontSize: "12px", color: "var(--gray)" }}>
-              Sin cambios de estado registrados aun
+              Sin cambios de estado registrados aún
             </div>
           ) : (
             <div
               style={{ display: "flex", flexDirection: "column", gap: "8px" }}
             >
               {historial.map((h) => {
-                const infoNuevo = INFO_ESTADOS[h.estado_nuevo];
-                const infoAnterior = INFO_ESTADOS[h.estado_anterior];
+                const cfgNuevo = ESTADOS[h.estado_nuevo];
+                const cfgAnterior = ESTADOS[h.estado_anterior];
                 return (
                   <div
                     key={h.id}
@@ -369,8 +300,8 @@ export default function DetalleGuia({ guia, onClose }) {
                       border: "1px solid var(--blk4)",
                     }}
                   >
-                    <span style={{ fontSize: "16px", flexShrink: 0 }}>
-                      {infoNuevo?.icono || "•"}
+                    <span style={{ fontSize: "14px", flexShrink: 0 }}>
+                      {DESCRIPCIONES[h.estado_nuevo]?.icono || "•"}
                     </span>
                     <div style={{ flex: 1 }}>
                       <div
@@ -387,7 +318,7 @@ export default function DetalleGuia({ guia, onClose }) {
                             <span
                               style={{ fontSize: "11px", color: "var(--gray)" }}
                             >
-                              {infoAnterior?.label || h.estado_anterior}
+                              {cfgAnterior?.label || h.estado_anterior}
                             </span>
                             <span
                               style={{ fontSize: "11px", color: "var(--gray)" }}
@@ -400,10 +331,10 @@ export default function DetalleGuia({ guia, onClose }) {
                           style={{
                             fontSize: "11px",
                             fontWeight: "500",
-                            color: infoNuevo?.color || "var(--m)",
+                            color: cfgNuevo?.color || "var(--m)",
                           }}
                         >
-                          {infoNuevo?.label || h.estado_nuevo}
+                          {cfgNuevo?.label || h.estado_nuevo}
                         </span>
                         <span
                           style={{

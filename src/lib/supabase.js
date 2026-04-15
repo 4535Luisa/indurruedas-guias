@@ -6,41 +6,11 @@ const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
 export const ESTADOS = {
-  aforada: {
-    label: "Mercancia aforada",
-    color: "#55AAFF",
-    bg: "#001a33",
-    border: "#003366",
-  },
-  despachada: {
-    label: "Mercancia despachada",
-    color: "#55AAFF",
-    bg: "#001a33",
-    border: "#003366",
-  },
-  en_muellex: {
-    label: "En muellex",
-    color: "#AA88FF",
-    bg: "#1a0033",
-    border: "#2a0055",
-  },
   en_transito: {
-    label: "En transito",
+    label: "En tránsito",
     color: "#55AAFF",
     bg: "#001a33",
     border: "#003366",
-  },
-  en_reparto: {
-    label: "En reparto urbano",
-    color: "#FFAA00",
-    bg: "#2a1800",
-    border: "#3d2400",
-  },
-  recibido: {
-    label: "Recibido en destino",
-    color: "#FFAA00",
-    bg: "#2a1800",
-    border: "#3d2400",
   },
   entregado: {
     label: "Entregado",
@@ -48,20 +18,20 @@ export const ESTADOS = {
     bg: "#0d1f00",
     border: "#1a3300",
   },
-  novedad: {
-    label: "Con novedad",
-    color: "#FF4444",
-    bg: "#2a0000",
-    border: "#440000",
-  },
   pendiente: {
     label: "Pendiente recogida",
     color: "#FFAA00",
     bg: "#2a1800",
     border: "#3d2400",
   },
+  novedad: {
+    label: "Con novedad",
+    color: "#FF4444",
+    bg: "#2a0000",
+    border: "#440000",
+  },
   informada: {
-    label: "Informada a TCC",
+    label: "Informada TCC",
     color: "#888888",
     bg: "#1a1a1a",
     border: "#2e2e2e",
@@ -84,19 +54,46 @@ export const TRANSPORTADORAS = {
   tcc: { label: "TCC", color: "#AA88FF", bg: "#1a0033", border: "#2a0055" },
 };
 
-// Mapeo de estados TCC del Excel al sistema
 export const MAPEO_ESTADOS_TCC = {
   entregada: "entregado",
+  entregado: "entregado",
+  "en proceso de entrega": "en_transito",
   "en proceso de traslado": "en_transito",
-  "envío en instalaciones tcc destino": "pendiente",
+  "envio en instalaciones tcc destino": "pendiente",
   "remesa informada a tcc": "informada",
-  "mercancía no despachada por el remitente": "no_despachada",
+  "mercancia no despachada por el remitente": "no_despachada",
 };
 
 export function normalizarEstadoTCC(estadoRaw) {
   if (!estadoRaw) return "en_transito";
   const lower = estadoRaw.toLowerCase().trim();
   for (const [key, val] of Object.entries(MAPEO_ESTADOS_TCC)) {
+    if (lower.includes(key)) return val;
+  }
+  return "en_transito";
+}
+
+export const MAPEO_ESTADOS_ESTELAR = {
+  aforada: "en_transito",
+  aforado: "en_transito",
+  despachada: "en_transito",
+  despachado: "en_transito",
+  muellex: "en_transito",
+  transito: "en_transito",
+  reparto: "en_transito",
+  recibido: "en_transito",
+  cumplido: "entregado",
+  entregada: "entregado",
+  entregado: "entregado",
+  novedad: "novedad",
+  devuelto: "novedad",
+  devolucion: "novedad",
+};
+
+export function normalizarEstadoEstelar(raw) {
+  if (!raw) return "en_transito";
+  const lower = raw.toLowerCase().trim();
+  for (const [key, val] of Object.entries(MAPEO_ESTADOS_ESTELAR)) {
     if (lower.includes(key)) return val;
   }
   return "en_transito";
