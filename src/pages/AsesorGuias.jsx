@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 import { PillEstado, PillTransportadora } from "../components/UI";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 
 export default function AsesorGuias() {
   const { perfil, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [guias, setGuias] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filtroTexto, setFiltroTexto] = useState("");
@@ -18,7 +20,6 @@ export default function AsesorGuias() {
 
   async function cargarGuias() {
     setLoading(true);
-
     const { data: clientesAsesor } = await supabase
       .from("clientes")
       .select("id")
@@ -31,15 +32,10 @@ export default function AsesorGuias() {
     }
 
     const clienteIds = clientesAsesor.map((c) => c.id);
-
     const { data } = await supabase
       .from("guias")
       .select(
-        `
-        id, numero_guia, transportadora, factura_indurruedas, estado,
-        fecha_guia, ciudad_destino, direccion_entrega, destinatario,
-        clientes(id, nombre, nit)
-      `,
+        "id, numero_guia, transportadora, factura_indurruedas, estado, fecha_guia, ciudad_destino, direccion_entrega, destinatario, clientes(id, nombre, nit)",
       )
       .in("cliente_id", clienteIds)
       .order("created_at", { ascending: false });
@@ -65,8 +61,7 @@ export default function AsesorGuias() {
   const novedad = guias.filter((g) => g.estado === "novedad").length;
   const criticas = guias.filter((g) => {
     if (!g.fecha_guia || g.estado === "entregado") return false;
-    const dias = Math.floor((new Date() - new Date(g.fecha_guia)) / 86400000);
-    return dias >= 10;
+    return Math.floor((new Date() - new Date(g.fecha_guia)) / 86400000) >= 10;
   }).length;
 
   const iniciales =
@@ -78,7 +73,6 @@ export default function AsesorGuias() {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--blk)" }}>
-      {/* Topbar */}
       <div
         style={{
           background: "var(--blk2)",
@@ -104,7 +98,7 @@ export default function AsesorGuias() {
               justifyContent: "center",
               fontSize: "13px",
               fontWeight: "700",
-              color: "var(--blk)",
+              color: theme === "dark" ? "#0E0E0E" : "#FFFFFF",
               fontFamily: "var(--font-mono)",
             }}
           >
@@ -125,7 +119,22 @@ export default function AsesorGuias() {
             </div>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <button
+            onClick={toggleTheme}
+            title={theme === "dark" ? "Modo claro" : "Modo oscuro"}
+            style={{
+              background: "transparent",
+              border: "1px solid var(--blk5)",
+              borderRadius: "6px",
+              color: "var(--gray)",
+              fontSize: "14px",
+              padding: "4px 8px",
+              cursor: "pointer",
+            }}
+          >
+            {theme === "dark" ? "☀️" : "🌙"}
+          </button>
           <div
             style={{
               width: "30px",
@@ -161,7 +170,6 @@ export default function AsesorGuias() {
       </div>
 
       <div style={{ padding: "16px", maxWidth: "1200px", margin: "0 auto" }}>
-        {/* KPIs */}
         <div
           style={{
             display: "grid",
@@ -217,7 +225,6 @@ export default function AsesorGuias() {
           ))}
         </div>
 
-        {/* Filtros */}
         <div
           style={{
             display: "flex",
@@ -280,18 +287,9 @@ export default function AsesorGuias() {
                       border: "1px solid var(--blk4)",
                       borderRadius: "10px",
                       padding: "14px",
-                      borderLeft: `3px solid ${
-                        g.estado === "novedad"
-                          ? "var(--danger)"
-                          : g.estado === "entregado"
-                            ? "var(--m)"
-                            : dias >= 10
-                              ? "var(--warn)"
-                              : "var(--blk5)"
-                      }`,
+                      borderLeft: `3px solid ${g.estado === "novedad" ? "var(--danger)" : g.estado === "entregado" ? "var(--m)" : dias >= 10 ? "var(--warn)" : "var(--blk5)"}`,
                     }}
                   >
-                    {/* Fila 1: guía + estado */}
                     <div
                       style={{
                         display: "flex",
@@ -338,8 +336,6 @@ export default function AsesorGuias() {
                       </div>
                       <PillEstado estado={g.estado} />
                     </div>
-
-                    {/* Fila 2: cliente */}
                     <div
                       style={{
                         fontSize: "13px",
@@ -350,8 +346,6 @@ export default function AsesorGuias() {
                     >
                       {g.clientes?.nombre || g.destinatario || "—"}
                     </div>
-
-                    {/* Fila 3: detalles */}
                     <div
                       style={{
                         display: "flex",
@@ -392,7 +386,6 @@ export default function AsesorGuias() {
                   </div>
                 );
               })}
-
               {filtradas.length === 0 && (
                 <div
                   style={{
@@ -402,11 +395,10 @@ export default function AsesorGuias() {
                     fontSize: "12px",
                   }}
                 >
-                  {loading ? "Cargando..." : "No se encontraron guías"}
+                  No se encontraron guías
                 </div>
               )}
             </div>
-
             <p
               style={{
                 fontSize: "10px",
@@ -415,8 +407,7 @@ export default function AsesorGuias() {
                 textAlign: "center",
               }}
             >
-              Mostrando {filtradas.length} de {guias.length} guías asignadas a
-              tu cartera
+              Mostrando {filtradas.length} de {guias.length} guías
             </p>
           </>
         )}

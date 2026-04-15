@@ -4,6 +4,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Guias from "./pages/Guias";
 import Clientes from "./pages/Clientes";
+import Usuarios from "./pages/Usuarios";
 import AsesorGuias from "./pages/AsesorGuias";
 import Layout from "./components/Layout";
 
@@ -28,7 +29,6 @@ function Loading() {
 
 export default function App() {
   const { user, perfil, loading } = useAuth();
-
   if (loading) return <Loading />;
 
   if (!user) {
@@ -48,6 +48,7 @@ export default function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/guias" element={<Guias />} />
           <Route path="/clientes" element={<Clientes />} />
+          <Route path="/usuarios" element={<Usuarios />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
       </Routes>
