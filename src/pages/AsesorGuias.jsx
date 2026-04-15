@@ -91,18 +91,16 @@ export default function AsesorGuias() {
             style={{
               width: "32px",
               height: "32px",
-              background: "var(--m)",
-              borderRadius: "8px",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: "13px",
-              fontWeight: "700",
-              color: theme === "dark" ? "#0E0E0E" : "#FFFFFF",
-              fontFamily: "var(--font-mono)",
             }}
           >
-            M
+            <img
+              src="/logo-macho.png"
+              alt="MACHO"
+              style={{ height: "28px", objectFit: "contain" }}
+            />
           </div>
           <div>
             <div

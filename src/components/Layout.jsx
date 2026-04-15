@@ -73,23 +73,11 @@ export default function Layout() {
               marginBottom: "10px",
             }}
           >
-            <div
-              style={{
-                width: "36px",
-                height: "36px",
-                background: "var(--m)",
-                borderRadius: "8px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "14px",
-                fontWeight: "700",
-                color: theme === "dark" ? "#0E0E0E" : "#FFFFFF",
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              M
-            </div>
+            <img
+              src="/logo-macho.png"
+              alt="MACHO"
+              style={{ height: "32px", objectFit: "contain" }}
+            />
             <button
               onClick={toggleTheme}
               title={theme === "dark" ? "Modo claro" : "Modo oscuro"}
@@ -118,8 +106,20 @@ export default function Layout() {
             Indurruedas SAS
           </div>
           <div
-            style={{ fontSize: "10px", color: "var(--gray)", marginTop: "2px" }}
+            style={{
+              fontSize: "10px",
+              color: "var(--gray)",
+              marginTop: "2px",
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+            }}
           >
+            <img
+              src="/icon-envios.svg"
+              alt=""
+              style={{ width: "14px", height: "14px", opacity: 0.6 }}
+            />
             Sistema de guías
           </div>
         </div>

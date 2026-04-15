@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export default function Login() {
@@ -6,7 +7,8 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, perfil } = useAuth();
+  const navigate = useNavigate();
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -16,9 +18,7 @@ export default function Login() {
     if (error) {
       setError("Correo o contraseña incorrectos");
       setLoading(false);
-      return;
     }
-    // El AuthContext carga el perfil y App.jsx redirige automáticamente
   }
 
   return (
@@ -34,24 +34,16 @@ export default function Login() {
     >
       <div style={{ width: "100%", maxWidth: "340px" }}>
         <div style={{ textAlign: "center", marginBottom: "32px" }}>
-          <div
+          <img
+            src="/logo-macho.png"
+            alt="MACHO"
             style={{
-              width: "52px",
-              height: "52px",
-              background: "var(--m)",
-              borderRadius: "12px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "22px",
-              fontWeight: "700",
-              color: "var(--blk)",
-              fontFamily: "var(--font-mono)",
+              height: "48px",
+              objectFit: "contain",
               margin: "0 auto 14px",
+              display: "block",
             }}
-          >
-            M
-          </div>
+          />
           <h1
             style={{
               fontSize: "20px",
@@ -62,7 +54,21 @@ export default function Login() {
           >
             Indurruedas SAS
           </h1>
-          <p style={{ fontSize: "12px", color: "var(--gray)" }}>
+          <p
+            style={{
+              fontSize: "12px",
+              color: "var(--gray)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "5px",
+            }}
+          >
+            <img
+              src="/icon-envios.svg"
+              alt=""
+              style={{ width: "14px", height: "14px", opacity: 0.5 }}
+            />
             Sistema de guías de envío
           </p>
         </div>
