@@ -187,7 +187,7 @@ export default function Guias() {
     let q = supabase
       .from("guias")
       .select(
-        "id, numero_guia, transportadora, factura_indurruedas, estado, fecha_guia, ciudad_destino, direccion_entrega, destinatario, clientes(id, nombre, nit, asesor_id, usuarios(id, nombre))",
+        "id, numero_guia, transportadora, factura_indurruedas, estado, fecha_guia, fecha_entrega, dias_habiles, ciudad_destino, direccion_entrega, destinatario, clientes(id, nombre, nit, asesor_id, usuarios(id, nombre))",
         { count: "exact" },
       )
       .order("created_at", { ascending: false })
@@ -207,6 +207,22 @@ export default function Guias() {
         (g) => g.clientes?.usuarios?.id === filtroAsesor,
       );
     }
+    // Ordenar: en_transito primero, luego resto por fecha descendente
+    const ORDEN = {
+      en_transito: 0,
+      pendiente: 1,
+      novedad: 2,
+      informada: 3,
+      entregado: 4,
+      no_despachada: 5,
+      anulada: 6,
+    };
+    resultado.sort((a, b) => {
+      const oa = ORDEN[a.estado] ?? 7;
+      const ob = ORDEN[b.estado] ?? 7;
+      if (oa !== ob) return oa - ob;
+      return new Date(b.fecha_guia || 0) - new Date(a.fecha_guia || 0);
+    });
     setGuias(resultado);
     setTotal(count || 0);
     setLoading(false);
@@ -301,7 +317,14 @@ export default function Guias() {
         const fechaEntrega = row["FECHA ENTREGA"]
           ? parsearFechaEstelar(row["FECHA ENTREGA"])
           : null;
-        const diasEntrega = parseInt(row["DIAS ENTREGA"]) || null;
+        const diasExcel = parseInt(row["DIAS ENTREGA"]) || null;
+        // Entregado: usar días del Excel. En tránsito: calcular desde fecha generación hasta hoy
+        const diasHabiles =
+          estado === "entregado"
+            ? diasExcel
+            : fechaGuia
+              ? Math.floor((new Date() - new Date(fechaGuia)) / 86400000)
+              : null;
         const destinatario = String(row["DESTINATARIO"] || "").trim();
         const nit = String(row["DOCUMENTO DESTINATARIO"] || "").trim();
         const ciudad = String(row["CIUDAD DESTINO"] || "").trim();
@@ -315,7 +338,7 @@ export default function Guias() {
             factura_indurruedas:
               factura || existentesMap[numeroGuia].factura_indurruedas,
             fecha_entrega: fechaEntrega,
-            dias_habiles: diasEntrega,
+            dias_habiles: diasHabiles,
           });
         } else {
           porInsertar.push({
@@ -329,7 +352,7 @@ export default function Guias() {
             ciudad_destino: ciudad,
             fecha_guia: fechaGuia,
             fecha_entrega: fechaEntrega,
-            dias_habiles: diasEntrega,
+            dias_habiles: diasHabiles,
             activa: estado !== "entregado",
           });
         }
@@ -461,7 +484,14 @@ export default function Guias() {
         const destino = String(row["Destino"] || "")
           .split("-")[0]
           .trim();
-        const diasHabiles = parseInt(row["Dias de entrega (habiles)"]) || null;
+        const diasExcel = parseInt(row["Dias de entrega (habiles)"]) || null;
+        // Entregado: usar días del Excel. En tránsito: calcular desde fecha generación hasta hoy
+        const diasHabiles =
+          estado === "entregado"
+            ? diasExcel
+            : fechaGuia
+              ? Math.floor((new Date() - new Date(fechaGuia)) / 86400000)
+              : null;
         const clienteId = await buscarClienteConCache(null, destinatario);
 
         if (existentesMap[numeroGuia]) {
@@ -473,6 +503,10 @@ export default function Guias() {
             });
           }
         } else {
+          const fechaEntregaTCC =
+            estado === "entregado" && row["Fecha de Entrega(dd/mm/aaaa)"]
+              ? String(row["Fecha de Entrega(dd/mm/aaaa)"]).split(" ")[0]
+              : null;
           porInsertar.push({
             numero_guia: numeroGuia,
             transportadora: "tcc",
@@ -483,6 +517,7 @@ export default function Guias() {
             direccion_entrega: direccion,
             ciudad_destino: destino,
             fecha_guia: fechaGuia,
+            fecha_entrega: fechaEntregaTCC,
             dias_habiles: diasHabiles,
             activa: estado !== "entregado",
           });
@@ -715,6 +750,7 @@ export default function Guias() {
           <option value="novedad">Con novedad</option>
           <option value="informada">Informada TCC</option>
           <option value="no_despachada">No despachada</option>
+          <option value="anulada">Anulada</option>
         </select>
         <select
           value={filtroAsesor}
@@ -771,11 +807,20 @@ export default function Guias() {
               </thead>
               <tbody>
                 {guias.map((g) => {
-                  const dias = g.fecha_guia
-                    ? Math.floor(
-                        (new Date() - new Date(g.fecha_guia)) / 86400000,
-                      )
-                    : 0;
+                  // Usar dias_habiles guardado en DB si existe
+                  // Si no, calcular: entregado = fecha_guia hasta fecha_entrega, activo = hasta hoy
+                  let dias = 0;
+                  if (g.dias_habiles != null) {
+                    dias = g.dias_habiles;
+                  } else if (g.fecha_guia) {
+                    const fechaFin =
+                      g.estado === "entregado" && g.fecha_entrega
+                        ? new Date(g.fecha_entrega)
+                        : new Date();
+                    dias = Math.floor(
+                      (fechaFin - new Date(g.fecha_guia)) / 86400000,
+                    );
+                  }
                   return (
                     <tr
                       key={g.id}
@@ -902,6 +947,7 @@ export default function Guias() {
                           <option value="novedad">Con novedad</option>
                           <option value="informada">Informada TCC</option>
                           <option value="no_despachada">No despachada</option>
+                          <option value="anulada">Anulada</option>
                         </select>
                       </Td>
                     </tr>

@@ -35,6 +35,11 @@ const DESCRIPCIONES = {
     texto:
       "La mercancía no fue enviada por el remitente. Verificar con el equipo de despacho de Indurruedas.",
   },
+  anulada: {
+    icono: "❌",
+    texto:
+      "Esta guía fue anulada. La mercancía no fue despachada por el remitente y el envío no se realizó.",
+  },
 };
 
 export default function DetalleGuia({ guia, onClose }) {

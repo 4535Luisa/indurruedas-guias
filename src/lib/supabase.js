@@ -42,6 +42,12 @@ export const ESTADOS = {
     bg: "#2a1200",
     border: "#3d1a00",
   },
+  anulada: {
+    label: "Anulada",
+    color: "#666666",
+    bg: "#1a1a1a",
+    border: "#2e2e2e",
+  },
 };
 
 export const TRANSPORTADORAS = {
@@ -61,7 +67,7 @@ export const MAPEO_ESTADOS_TCC = {
   "en proceso de traslado": "en_transito",
   "envio en instalaciones tcc destino": "pendiente",
   "remesa informada a tcc": "informada",
-  "mercancia no despachada por el remitente": "no_despachada",
+  "mercancia no despachada por el remitente": "anulada",
 };
 
 export function normalizarEstadoTCC(estadoRaw) {

@@ -35,12 +35,27 @@ export default function AsesorGuias() {
     const { data } = await supabase
       .from("guias")
       .select(
-        "id, numero_guia, transportadora, factura_indurruedas, estado, fecha_guia, ciudad_destino, direccion_entrega, destinatario, clientes(id, nombre, nit)",
+        "id, numero_guia, transportadora, factura_indurruedas, estado, fecha_guia, fecha_entrega, dias_habiles, ciudad_destino, direccion_entrega, destinatario, clientes(id, nombre, nit)",
       )
       .in("cliente_id", clienteIds)
+      .neq("estado", "anulada")
       .order("created_at", { ascending: false });
 
-    setGuias(data || []);
+    const ORDEN = {
+      en_transito: 0,
+      pendiente: 1,
+      novedad: 2,
+      informada: 3,
+      entregado: 4,
+      no_despachada: 5,
+    };
+    const sorted = (data || []).sort((a, b) => {
+      const oa = ORDEN[a.estado] ?? 7;
+      const ob = ORDEN[b.estado] ?? 7;
+      if (oa !== ob) return oa - ob;
+      return new Date(b.fecha_guia || 0) - new Date(a.fecha_guia || 0);
+    });
+    setGuias(sorted);
     setLoading(false);
   }
 
@@ -60,7 +75,8 @@ export default function AsesorGuias() {
   const activas = guias.filter((g) => g.estado !== "entregado").length;
   const novedad = guias.filter((g) => g.estado === "novedad").length;
   const criticas = guias.filter((g) => {
-    if (!g.fecha_guia || g.estado === "entregado") return false;
+    if (g.estado === "entregado") return false;
+    if (!g.fecha_guia) return false;
     return Math.floor((new Date() - new Date(g.fecha_guia)) / 86400000) >= 10;
   }).length;
 
@@ -271,9 +287,18 @@ export default function AsesorGuias() {
               style={{ display: "flex", flexDirection: "column", gap: "8px" }}
             >
               {filtradas.map((g) => {
-                const dias = g.fecha_guia
-                  ? Math.floor((new Date() - new Date(g.fecha_guia)) / 86400000)
-                  : 0;
+                let dias = 0;
+                if (g.dias_habiles != null) {
+                  dias = g.dias_habiles;
+                } else if (g.fecha_guia) {
+                  const fechaFin =
+                    g.estado === "entregado" && g.fecha_entrega
+                      ? new Date(g.fecha_entrega)
+                      : new Date();
+                  dias = Math.floor(
+                    (fechaFin - new Date(g.fecha_guia)) / 86400000,
+                  );
+                }
                 const colorDias =
                   dias >= 10
                     ? "var(--danger)"
