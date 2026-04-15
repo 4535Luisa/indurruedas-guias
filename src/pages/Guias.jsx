@@ -18,14 +18,23 @@ import { es } from "date-fns/locale";
 const POR_PAGINA = 50;
 
 const MAPEO_ESTELAR = {
+  aforada: "aforada",
+  aforado: "aforada",
+  despachada: "despachada",
+  despachado: "despachada",
+  muellex: "en_muellex",
+  "transito nacional": "en_transito",
+  transito: "en_transito",
+  "reparto urbano": "en_reparto",
+  reparto: "en_reparto",
+  "recibido en destino": "recibido",
+  recibido: "recibido",
   cumplido: "entregado",
   entregado: "entregado",
-  "en transito": "en_transito",
+  entregada: "entregado",
   novedad: "novedad",
-  "con novedad": "novedad",
   devuelto: "novedad",
-  pendiente: "pendiente",
-  "en bodega": "pendiente",
+  devolucion: "novedad",
 };
 
 function normalizarEstadoEstelar(raw) {
@@ -725,10 +734,15 @@ export default function Guias() {
           style={{ minWidth: "160px" }}
         >
           <option value="">Todos los estados</option>
+          <option value="aforada">Aforada</option>
+          <option value="despachada">Despachada</option>
+          <option value="en_muellex">En muellex</option>
           <option value="en_transito">En transito</option>
+          <option value="en_reparto">En reparto urbano</option>
+          <option value="recibido">Recibido en destino</option>
           <option value="entregado">Entregado</option>
-          <option value="pendiente">Pendiente recogida</option>
           <option value="novedad">Con novedad</option>
+          <option value="pendiente">Pendiente recogida (TCC)</option>
           <option value="informada">Informada TCC</option>
           <option value="no_despachada">No despachada</option>
         </select>
@@ -909,13 +923,18 @@ export default function Guias() {
                           style={{
                             fontSize: "10px",
                             padding: "3px 6px",
-                            minWidth: "110px",
+                            minWidth: "130px",
                           }}
                         >
+                          <option value="aforada">Aforada</option>
+                          <option value="despachada">Despachada</option>
+                          <option value="en_muellex">En muellex</option>
                           <option value="en_transito">En transito</option>
+                          <option value="en_reparto">En reparto urbano</option>
+                          <option value="recibido">Recibido en destino</option>
                           <option value="entregado">Entregado</option>
-                          <option value="pendiente">Pendiente</option>
                           <option value="novedad">Con novedad</option>
+                          <option value="pendiente">Pendiente (TCC)</option>
                           <option value="informada">Informada TCC</option>
                           <option value="no_despachada">No despachada</option>
                         </select>
@@ -941,10 +960,16 @@ export default function Guias() {
 
           <div
             style={{
+              position: "sticky",
+              bottom: 0,
+              zIndex: 10,
+              background: "var(--blk)",
+              borderTop: "1px solid var(--blk4)",
+              padding: "10px 0",
+              marginTop: "8px",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              marginTop: "14px",
               flexWrap: "wrap",
               gap: "8px",
             }}

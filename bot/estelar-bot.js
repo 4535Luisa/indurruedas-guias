@@ -1,264 +1,324 @@
 /**
- * BOT ESTELAR EXPRESS (GELOTRA)
- * Ejecutado por GitHub Actions 3 veces al día
- * Requiere: Node.js 18+, playwright, @supabase/supabase-js
+ * BOT RASTREO ESTELAR EXPRESS
+ * Entra a la pagina publica de rastreo, busca cada guia activa
+ * y actualiza el estado en Supabase
  *
- * Variables de entorno necesarias (GitHub Secrets):
- *   GELOTRA_URL, GELOTRA_USER, GELOTRA_PASS
- *   SUPABASE_URL, SUPABASE_SERVICE_KEY
+ * Ejecutar: node estelar-bot.js
+ * GitHub Actions: 3 veces al dia automaticamente
  */
 
-import { chromium } from 'playwright'
-import { createClient } from '@supabase/supabase-js'
+import { chromium } from "playwright";
+import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-)
+  process.env.SUPABASE_SERVICE_KEY,
+);
 
+const URL_RASTREO =
+  "https://estelarexpress.co/index.php/atencion-al-cliente/rastreo-de-guia";
+
+// Mapeo de estados de trazabilidad Estelar → sistema
 const MAPEO_ESTADOS = {
-  'en tránsito':       'en_transito',
-  'en transito':       'en_transito',
-  'entregado':         'entregado',
-  'entregada':         'entregado',
-  'pendiente':         'pendiente',
-  'en bodega':         'pendiente',
-  'novedad':           'novedad',
-  'con novedad':       'novedad',
-  'devuelto':          'novedad',
-  'devolución':        'novedad',
-}
+  aforada: "aforada",
+  despachada: "despachada",
+  despachado: "despachada",
+  "en muellex": "en_muellex",
+  muellex: "en_muellex",
+  "transito nacional": "en_transito",
+  transito: "en_transito",
+  "reparto urbano": "en_reparto",
+  reparto: "en_reparto",
+  "recibido en destino": "recibido",
+  recibido: "recibido",
+  cumplido: "entregado",
+  entregada: "entregado",
+  entregado: "entregado",
+  novedad: "novedad",
+  devuelto: "novedad",
+  devolucion: "novedad",
+};
 
-function normalizarEstado(rawEstado) {
-  if (!rawEstado) return 'en_transito'
-  const lower = rawEstado.toLowerCase().trim()
-  for (const [key, val] of Object.entries(MAPEO_ESTADOS)) {
-    if (lower.includes(key)) return val
+function mapearEstado(textoTrazabilidad) {
+  if (!textoTrazabilidad) return null;
+  const lower = textoTrazabilidad.toLowerCase();
+  for (const [clave, estado] of Object.entries(MAPEO_ESTADOS)) {
+    if (lower.includes(clave)) return estado;
   }
-  return 'en_transito'
+  return null;
 }
 
 async function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms))
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function rastrearGuia(page, numeroGuia) {
+  try {
+    // Ir a la pagina de rastreo
+    await page.goto(URL_RASTREO, {
+      waitUntil: "domcontentloaded",
+      timeout: 30000,
+    });
+    await sleep(2000);
+
+    // Buscar el campo de texto - puede estar en iframe
+    let campo = null;
+    let frame = page;
+
+    // Intentar encontrar el campo en iframes
+    const iframes = page.frames();
+    for (const f of iframes) {
+      try {
+        const input = await f.$(
+          'input[type="text"], input[placeholder*="guia"], input[placeholder*="guía"], input[name*="guia"], input[name*="remision"]',
+        );
+        if (input) {
+          campo = input;
+          frame = f;
+          break;
+        }
+      } catch {}
+    }
+
+    // Si no encontro en iframe, buscar en pagina principal
+    if (!campo) {
+      campo = await page.$(
+        'input[type="text"], input[placeholder*="guia"], input[placeholder*="guía"]',
+      );
+    }
+
+    if (!campo) {
+      console.log(`  ⚠️  ${numeroGuia}: no se encontro campo de busqueda`);
+      return null;
+    }
+
+    // Limpiar e ingresar el numero de guia
+    await campo.click({ clickCount: 3 });
+    await campo.fill(numeroGuia);
+    await sleep(500);
+
+    // Buscar y hacer clic en el boton de rastrear
+    let boton = null;
+    try {
+      boton = await frame.$(
+        'button:has-text("Rastrear"), button:has-text("rastrear"), input[type="submit"], button[type="submit"]',
+      );
+    } catch {}
+
+    if (boton) {
+      await boton.click();
+    } else {
+      await campo.press("Enter");
+    }
+
+    await sleep(3000);
+
+    // Leer la trazabilidad - buscar los items del historial
+    let ultimoEstadoTexto = null;
+
+    // Intentar en el frame donde esta el formulario
+    const frames2 = page.frames();
+    for (const f of frames2) {
+      try {
+        // Buscar elementos de trazabilidad
+        const items = await f.$$(
+          ".trazabilidad tr td, .tracking-item, li, .timeline-item, table tr",
+        );
+        if (items.length > 0) {
+          // Tomar el ultimo item (estado mas reciente)
+          const textos = [];
+          for (const item of items) {
+            const texto = await item.textContent();
+            if (
+              texto &&
+              texto.trim().length > 5 &&
+              texto.toLowerCase().includes("mercanc")
+            ) {
+              textos.push(texto.trim());
+            }
+          }
+          if (textos.length > 0) {
+            ultimoEstadoTexto = textos[textos.length - 1];
+            break;
+          }
+        }
+      } catch {}
+    }
+
+    // Si no encontro en items especificos, buscar texto en pagina
+    if (!ultimoEstadoTexto) {
+      for (const f of frames2) {
+        try {
+          const contenido = await f.textContent("body");
+          if (contenido && contenido.toLowerCase().includes("trazabilidad")) {
+            // Extraer lineas con estados conocidos
+            const lineas = contenido
+              .split("\n")
+              .map((l) => l.trim())
+              .filter((l) => l.length > 10);
+            const lineasEstado = lineas.filter(
+              (l) =>
+                l.toLowerCase().includes("mercanc") ||
+                l.toLowerCase().includes("reparto") ||
+                l.toLowerCase().includes("cumplido") ||
+                l.toLowerCase().includes("entregad") ||
+                l.toLowerCase().includes("devuelto"),
+            );
+            if (lineasEstado.length > 0) {
+              ultimoEstadoTexto = lineasEstado[lineasEstado.length - 1];
+              break;
+            }
+          }
+        } catch {}
+      }
+    }
+
+    if (!ultimoEstadoTexto) {
+      console.log(`  ⚠️  ${numeroGuia}: no se pudo leer trazabilidad`);
+      return null;
+    }
+
+    const estado = mapearEstado(ultimoEstadoTexto);
+    console.log(
+      `  📦 ${numeroGuia}: "${ultimoEstadoTexto.substring(0, 60)}" → ${estado || "sin mapeo"}`,
+    );
+    return estado;
+  } catch (err) {
+    console.log(`  ❌ ${numeroGuia}: error - ${err.message.substring(0, 80)}`);
+    return null;
+  }
 }
 
 async function main() {
-  console.log('🤖 Bot Estelar Express iniciando —', new Date().toISOString())
+  const inicio = new Date();
+  console.log("🤖 Bot Estelar Express iniciando —", inicio.toISOString());
 
-  let browser
-  let guiasNuevas = 0
-  let guiasActualizadas = 0
-  let errores = 0
-  const detalles = []
+  let actualizadas = 0;
+  let sinCambios = 0;
+  let errores = 0;
+  const cambios = [];
 
-  try {
-    browser = await chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    })
+  // Obtener guias activas de Estelar que NO esten entregadas
+  const { data: guias, error } = await supabase
+    .from("guias")
+    .select("id, numero_guia, estado")
+    .eq("transportadora", "estelar")
+    .eq("activa", true)
+    .neq("estado", "entregado");
 
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-      viewport: { width: 1280, height: 800 }
-    })
-
-    const page = await context.newPage()
-
-    // ── 1. LOGIN ────────────────────────────────────────────────────
-    console.log('📋 Iniciando sesión en Gelotra...')
-    await page.goto(process.env.GELOTRA_URL, { waitUntil: 'networkidle', timeout: 30000 })
-    await sleep(1500)
-
-    // Llenar credenciales (ajustar selectores según la página real de Gelotra)
-    await page.fill('input[name="usuario"], input[type="text"]', process.env.GELOTRA_USER)
-    await page.fill('input[name="password"], input[type="password"]', process.env.GELOTRA_PASS)
-    await page.click('button[type="submit"], input[type="submit"]')
-    await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 20000 })
-    console.log('✅ Sesión iniciada')
-
-    // ── 2. OBTENER GUÍAS ACTIVAS DE SUPABASE ────────────────────────
-    const { data: guiasActivas, error: dbError } = await supabase
-      .from('guias')
-      .select('id, numero_guia, estado')
-      .eq('transportadora', 'estelar')
-      .eq('activa', true)
-
-    if (dbError) throw new Error('Error consultando Supabase: ' + dbError.message)
-    console.log(`📦 ${guiasActivas.length} guías activas de Estelar a verificar`)
-
-    // ── 3. BUSCAR GUÍAS NUEVAS EN GELOTRA ───────────────────────────
-    // Navegar a la sección de remesas/guías generadas
-    try {
-      await page.click('a[href*="remesa"], a[href*="guia"], a:has-text("Remesas"), a:has-text("Guías")')
-      await page.waitForLoadState('networkidle')
-      await sleep(1000)
-    } catch {
-      console.log('⚠️  No se encontró enlace de remesas, continuando con rastreo individual')
-    }
-
-    // ── 4. RASTREAR CADA GUÍA ACTIVA ────────────────────────────────
-    for (const guia of guiasActivas) {
-      try {
-        console.log(`🔍 Rastreando guía ${guia.numero_guia}...`)
-
-        // Navegar al rastreo de la guía
-        const urlRastreo = `${process.env.GELOTRA_URL}/rastreo?guia=${guia.numero_guia}`
-        await page.goto(urlRastreo, { waitUntil: 'networkidle', timeout: 15000 })
-        await sleep(800)
-
-        // Extraer estado actual (ajustar selector según HTML real de Gelotra)
-        let estadoRaw = null
-        try {
-          estadoRaw = await page.textContent(
-            '.estado-guia, .status, [class*="estado"], [class*="status"], .tracking-status',
-            { timeout: 5000 }
-          )
-        } catch {
-          // Intentar buscar en tabla de rastreo
-          try {
-            const rows = await page.$$('table tr, .timeline-item, .tracking-item')
-            if (rows.length > 0) {
-              estadoRaw = await rows[rows.length - 1].textContent()
-            }
-          } catch {
-            console.log(`  ⚠️  No se pudo leer estado de ${guia.numero_guia}`)
-            errores++
-            continue
-          }
-        }
-
-        const nuevoEstado = normalizarEstado(estadoRaw)
-
-        // Actualizar solo si cambió
-        if (nuevoEstado !== guia.estado) {
-          const { error } = await supabase
-            .from('guias')
-            .update({
-              estado: nuevoEstado,
-              activa: nuevoEstado !== 'entregado',
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', guia.id)
-
-          if (!error) {
-            guiasActualizadas++
-            detalles.push({ guia: guia.numero_guia, de: guia.estado, a: nuevoEstado })
-            console.log(`  ✅ ${guia.numero_guia}: ${guia.estado} → ${nuevoEstado}`)
-          } else {
-            errores++
-            console.log(`  ❌ Error actualizando ${guia.numero_guia}:`, error.message)
-          }
-        } else {
-          console.log(`  — ${guia.numero_guia}: sin cambios (${guia.estado})`)
-        }
-
-        await sleep(500) // pausa para no saturar el servidor
-      } catch (err) {
-        errores++
-        console.log(`  ❌ Error procesando ${guia.numero_guia}:`, err.message)
-      }
-    }
-
-    // ── 5. BUSCAR GUÍAS NUEVAS ───────────────────────────────────────
-    // Obtener números de guías ya registradas
-    const { data: registradas } = await supabase
-      .from('guias')
-      .select('numero_guia')
-      .eq('transportadora', 'estelar')
-    const registradasSet = new Set((registradas || []).map(g => g.numero_guia))
-
-    try {
-      // Navegar a listado de guías generadas hoy / últimos 7 días
-      await page.goto(`${process.env.GELOTRA_URL}/remesas`, { waitUntil: 'networkidle', timeout: 15000 })
-      await sleep(1000)
-
-      // Extraer tabla de guías
-      const filas = await page.$$('table tbody tr, .remesa-row, .guia-row')
-
-      for (const fila of filas) {
-        try {
-          const celdas = await fila.$$('td')
-          if (celdas.length < 3) continue
-
-          const numeroGuia = (await celdas[0].textContent()).trim()
-          if (!numeroGuia || registradasSet.has(numeroGuia)) continue
-
-          const fechaRaw = celdas[1] ? (await celdas[1].textContent()).trim() : null
-          const destinatario = celdas[2] ? (await celdas[2].textContent()).trim() : null
-          const ciudad = celdas[3] ? (await celdas[3].textContent()).trim() : null
-          const estadoRaw = celdas[4] ? (await celdas[4].textContent()).trim() : null
-          const factura = celdas[5] ? (await celdas[5].textContent()).trim() : null
-
-          // Buscar cliente en Supabase por nombre destinatario
-          let clienteId = null
-          if (destinatario) {
-            const palabras = destinatario.split(' ').slice(0, 2).join(' ')
-            const { data: match } = await supabase
-              .from('clientes')
-              .select('id')
-              .ilike('nombre', `%${palabras}%`)
-              .limit(1)
-            if (match?.[0]) clienteId = match[0].id
-          }
-
-          const { error } = await supabase.from('guias').insert({
-            numero_guia: numeroGuia,
-            transportadora: 'estelar',
-            factura_indurruedas: factura || null,
-            cliente_id: clienteId,
-            destinatario,
-            ciudad_destino: ciudad,
-            estado: normalizarEstado(estadoRaw),
-            fecha_guia: fechaRaw ? parsearFecha(fechaRaw) : new Date().toISOString().split('T')[0],
-            activa: true
-          })
-
-          if (!error) {
-            guiasNuevas++
-            console.log(`  🆕 Nueva guía registrada: ${numeroGuia}`)
-          }
-        } catch (err) {
-          errores++
-        }
-      }
-    } catch (err) {
-      console.log('⚠️  No se pudo obtener listado de nuevas guías:', err.message)
-    }
-
-  } catch (err) {
-    console.error('❌ Error crítico del bot:', err.message)
-    errores++
-  } finally {
-    if (browser) await browser.close()
+  if (error) {
+    console.error("Error consultando Supabase:", error.message);
+    process.exit(1);
   }
 
-  // ── 6. REGISTRAR EN SYNC_LOG ─────────────────────────────────────
-  await supabase.from('sync_log').insert({
-    transportadora: 'estelar',
-    guias_nuevas: guiasNuevas,
-    guias_actualizadas: guiasActualizadas,
+  console.log(`📋 ${guias.length} guias activas de Estelar a rastrear`);
+
+  if (guias.length === 0) {
+    console.log("✅ No hay guias activas para rastrear");
+    return;
+  }
+
+  // Lanzar Playwright
+  const browser = await chromium.launch({
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+    ],
+  });
+
+  const context = await browser.newContext({
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+    viewport: { width: 1280, height: 800 },
+  });
+
+  const page = await context.newPage();
+
+  // Procesar guias en lotes para no sobrecargar el servidor
+  const LOTE = 5;
+  for (let i = 0; i < guias.length; i++) {
+    const guia = guias[i];
+    console.log(
+      `\n[${i + 1}/${guias.length}] Rastreando ${guia.numero_guia}...`,
+    );
+
+    const nuevoEstado = await rastrearGuia(page, guia.numero_guia);
+
+    if (!nuevoEstado) {
+      errores++;
+      continue;
+    }
+
+    if (nuevoEstado === guia.estado) {
+      sinCambios++;
+      continue;
+    }
+
+    // Actualizar en Supabase
+    const { error: updateError } = await supabase
+      .from("guias")
+      .update({
+        estado: nuevoEstado,
+        activa: nuevoEstado !== "entregado",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", guia.id);
+
+    if (!updateError) {
+      // Registrar en historial
+      await supabase.from("historial_estados").insert({
+        guia_id: guia.id,
+        estado_anterior: guia.estado,
+        estado_nuevo: nuevoEstado,
+        fuente: "bot",
+      });
+      actualizadas++;
+      cambios.push({ guia: guia.numero_guia, de: guia.estado, a: nuevoEstado });
+      console.log(`  ✅ Actualizada: ${guia.estado} → ${nuevoEstado}`);
+    } else {
+      errores++;
+      console.log(`  ❌ Error guardando:`, updateError.message);
+    }
+
+    // Pausa entre guias para no saturar el servidor
+    if ((i + 1) % LOTE === 0 && i < guias.length - 1) {
+      console.log(`\n⏳ Pausa de 3 segundos...`);
+      await sleep(3000);
+    } else {
+      await sleep(1000);
+    }
+  }
+
+  await browser.close();
+
+  // Registrar en sync_log
+  const duracion = Math.round((new Date() - inicio) / 1000);
+  await supabase.from("sync_log").insert({
+    transportadora: "estelar",
+    guias_nuevas: 0,
+    guias_actualizadas: actualizadas,
     errores,
-    detalle: { cambios: detalles, timestamp: new Date().toISOString() }
-  })
+    detalle: {
+      tipo: "bot_rastreo",
+      total_rastreadas: guias.length,
+      sin_cambios: sinCambios,
+      duracion_segundos: duracion,
+      cambios,
+    },
+  });
 
-  console.log('\n📊 RESUMEN:')
-  console.log(`   Guías nuevas:       ${guiasNuevas}`)
-  console.log(`   Guías actualizadas: ${guiasActualizadas}`)
-  console.log(`   Errores:            ${errores}`)
-  console.log('✅ Bot finalizado —', new Date().toISOString())
+  console.log("\n📊 RESUMEN:");
+  console.log(`   Total rastreadas: ${guias.length}`);
+  console.log(`   Actualizadas:     ${actualizadas}`);
+  console.log(`   Sin cambios:      ${sinCambios}`);
+  console.log(`   Errores:          ${errores}`);
+  console.log(`   Duracion:         ${duracion}s`);
+  console.log("✅ Bot finalizado —", new Date().toISOString());
 }
 
-function parsearFecha(str) {
-  if (!str) return null
-  // Soporta dd/mm/yyyy y yyyy-mm-dd
-  if (str.includes('/')) {
-    const [d, m, y] = str.split('/')
-    return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
-  }
-  return str.split('T')[0]
-}
-
-main().catch(err => {
-  console.error('Error fatal:', err)
-  process.exit(1)
-})
+main().catch((err) => {
+  console.error("Error fatal:", err);
+  process.exit(1);
+});

@@ -21,7 +21,11 @@ export default function Dashboard() {
   const [porAsesor, setPorAsesor] = useState([]);
   const [porEstado, setPorEstado] = useState([]);
   const [ultimasGuias, setUltimasGuias] = useState([]);
-  const [ultimaSync, setUltimaSync] = useState(null);
+  const [syncs, setSyncs] = useState({
+    bot: null,
+    excel_estelar: null,
+    excel_tcc: null,
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -44,15 +48,26 @@ export default function Dashboard() {
           .limit(8),
         supabase
           .from("sync_log")
-          .select("created_at, guias_nuevas, guias_actualizadas")
+          .select(
+            "created_at, guias_nuevas, guias_actualizadas, transportadora, detalle",
+          )
           .order("created_at", { ascending: false })
-          .limit(1),
+          .limit(20),
       ]);
     if (statsRes.data) setStats(statsRes.data);
     setPorAsesor(asesorRes.data || []);
     setPorEstado(estadoRes.data || []);
     setUltimasGuias(recientesRes.data || []);
-    setUltimaSync(syncRes.data?.[0] || null);
+
+    // Clasificar ultimas sincronizaciones por tipo
+    const logs = syncRes.data || [];
+    const bot = logs.find((l) => l.detalle?.tipo === "bot_rastreo");
+    const excelEstelar = logs.find(
+      (l) =>
+        l.transportadora === "estelar" && l.detalle?.tipo !== "bot_rastreo",
+    );
+    const excelTcc = logs.find((l) => l.transportadora === "tcc");
+    setSyncs({ bot, excel_estelar: excelEstelar, excel_tcc: excelTcc });
     setLoading(false);
   }
 
@@ -311,35 +326,100 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {ultimaSync && (
-        <div
-          style={{
-            background: "var(--blk2)",
-            border: "1px solid var(--blk4)",
-            borderRadius: "8px",
-            padding: "10px 14px",
-            marginBottom: "16px",
-            display: "flex",
-            gap: "16px",
-            flexWrap: "wrap",
-            fontSize: "11px",
-            color: "var(--gray)",
-          }}
-        >
-          <span>
-            Última carga:{" "}
-            {format(
-              parseISO(ultimaSync.created_at),
-              "d MMM yyyy 'a las' h:mm a",
-              { locale: es },
+      {/* Panel de sincronizaciones */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, minmax(0,1fr))",
+          gap: "10px",
+          marginBottom: "16px",
+        }}
+      >
+        {[
+          {
+            titulo: "Bot rastreo Estelar",
+            icono: "🤖",
+            data: syncs.bot,
+            color: "var(--m)",
+            detalle: syncs.bot
+              ? `${syncs.bot.guias_actualizadas} estados actualizados · ${syncs.bot.detalle?.total_rastreadas || 0} rastreadas`
+              : null,
+          },
+          {
+            titulo: "Ultimo Excel Estelar",
+            icono: "📥",
+            data: syncs.excel_estelar,
+            color: "#55AAFF",
+            detalle: syncs.excel_estelar
+              ? `+${syncs.excel_estelar.guias_nuevas} nuevas · ${syncs.excel_estelar.guias_actualizadas} actualizadas`
+              : null,
+          },
+          {
+            titulo: "Ultimo Excel TCC",
+            icono: "📥",
+            data: syncs.excel_tcc,
+            color: "#AA88FF",
+            detalle: syncs.excel_tcc
+              ? `+${syncs.excel_tcc.guias_nuevas} nuevas · ${syncs.excel_tcc.guias_actualizadas} actualizadas`
+              : null,
+          },
+        ].map(({ titulo, icono, data, color, detalle }) => (
+          <div
+            key={titulo}
+            style={{
+              background: "var(--blk2)",
+              border: "1px solid var(--blk4)",
+              borderRadius: "8px",
+              padding: "12px 14px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "7px",
+                marginBottom: "6px",
+              }}
+            >
+              <span style={{ fontSize: "14px" }}>{icono}</span>
+              <span
+                style={{
+                  fontSize: "11px",
+                  fontWeight: "500",
+                  color: "var(--wht2)",
+                }}
+              >
+                {titulo}
+              </span>
+            </div>
+            {data ? (
+              <>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color,
+                    fontWeight: "500",
+                    marginBottom: "2px",
+                  }}
+                >
+                  {format(
+                    parseISO(data.created_at),
+                    "d MMM yyyy 'a las' h:mm a",
+                    { locale: es },
+                  )}
+                </div>
+                <div style={{ fontSize: "10px", color: "var(--gray)" }}>
+                  {detalle}
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: "11px", color: "var(--gray)" }}>
+                Sin registros aun
+              </div>
             )}
-          </span>
-          <span style={{ color: "var(--m)" }}>
-            +{ultimaSync.guias_nuevas} nuevas
-          </span>
-          <span>{ultimaSync.guias_actualizadas} actualizadas</span>
-        </div>
-      )}
+          </div>
+        ))}
+      </div>
 
       <div
         style={{
