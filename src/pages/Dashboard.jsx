@@ -322,11 +322,12 @@ export default function Dashboard() {
                     <span
                       style={{
                         fontSize: "10px",
-                        color: "#AA88FF",
-                        background: "#1a0a2e",
-                        padding: "2px 6px",
+                        color: "#CC99FF",
+                        background: "rgba(170,136,255,0.2)",
+                        padding: "2px 8px",
                         borderRadius: "10px",
-                        border: "1px solid #3d1a66",
+                        border: "1px solid rgba(170,136,255,0.4)",
+                        fontWeight: "500",
                       }}
                     >
                       {g.transportadora_nombre
@@ -334,8 +335,34 @@ export default function Dashboard() {
                         .slice(0, 2)
                         .join(" ")}
                     </span>
+                  ) : g.transportadora === "estelar" ? (
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        color: "#AAFF00",
+                        background: "rgba(170,255,0,0.15)",
+                        padding: "2px 8px",
+                        borderRadius: "10px",
+                        border: "1px solid rgba(170,255,0,0.4)",
+                        fontWeight: "500",
+                      }}
+                    >
+                      Estelar Express
+                    </span>
                   ) : (
-                    <PillTransportadora transportadora={g.transportadora} />
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        color: "#88AAFF",
+                        background: "rgba(85,170,255,0.15)",
+                        padding: "2px 8px",
+                        borderRadius: "10px",
+                        border: "1px solid rgba(85,170,255,0.4)",
+                        fontWeight: "500",
+                      }}
+                    >
+                      TCC
+                    </span>
                   )}
                   <span
                     style={{
