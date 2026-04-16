@@ -35,7 +35,7 @@ export default function AsesorGuias() {
     const { data } = await supabase
       .from("guias")
       .select(
-        "id, numero_guia, transportadora, factura_indurruedas, estado, fecha_guia, fecha_entrega, dias_habiles, ciudad_destino, direccion_entrega, destinatario, clientes(id, nombre, nit)",
+        "id, numero_guia, transportadora, transportadora_nombre, factura_indurruedas, estado, fecha_guia, fecha_entrega, dias_habiles, ciudad_destino, direccion_entrega, destinatario, clientes(id, nombre, nit)",
       )
       .in("cliente_id", clienteIds)
       .neq("estado", "anulada")
@@ -344,7 +344,28 @@ export default function AsesorGuias() {
                         >
                           {g.numero_guia}
                         </span>
-                        <PillTransportadora transportadora={g.transportadora} />
+                        {g.transportadora === "otra" ? (
+                          <span
+                            style={{
+                              fontSize: "10px",
+                              padding: "2px 7px",
+                              borderRadius: "20px",
+                              background: "#1a0a2e",
+                              border: "1px solid #3d1a66",
+                              color: "#AA88FF",
+                              fontWeight: "500",
+                            }}
+                          >
+                            {g.transportadora_nombre
+                              ?.split(" ")
+                              .slice(0, 2)
+                              .join(" ") || "Otra"}
+                          </span>
+                        ) : (
+                          <PillTransportadora
+                            transportadora={g.transportadora}
+                          />
+                        )}
                         {g.factura_indurruedas && (
                           <span
                             style={{
