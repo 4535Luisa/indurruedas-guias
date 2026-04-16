@@ -8,13 +8,24 @@ import {
 } from "../components/UI";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
+import { useNavigate } from "react-router-dom";
+
+const COLORES = [
+  "#AAFF00",
+  "#55AAFF",
+  "#AA88FF",
+  "#FFAA00",
+  "#FF6655",
+  "#44DDBB",
+  "#FF88CC",
+];
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState({
     guias_activas: 0,
     entregadas: 0,
     con_novedad: 0,
-    criticas: 0,
     estelar_activas: 0,
     tcc_activas: 0,
   });
@@ -26,6 +37,9 @@ export default function Dashboard() {
     excel_estelar: null,
     excel_tcc: null,
   });
+  const [guiasCriticas, setGuiasCriticas] = useState([]);
+  const [tiemposTrans, setTiemposTrans] = useState([]);
+  const [enviosMes, setEnviosMes] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -34,40 +48,156 @@ export default function Dashboard() {
 
   async function cargarDatos() {
     setLoading(true);
-    const [statsRes, asesorRes, estadoRes, recientesRes, syncRes] =
-      await Promise.all([
-        supabase.from("dashboard_stats").select("*").single(),
-        supabase.rpc("guias_por_asesor"),
-        supabase.rpc("guias_por_estado"),
-        supabase
-          .from("guias")
-          .select(
-            "numero_guia, transportadora, estado, fecha_guia, ciudad_destino, clientes(nombre, usuarios(nombre))",
-          )
-          .order("created_at", { ascending: false })
-          .limit(8),
-        supabase
-          .from("sync_log")
-          .select(
-            "created_at, guias_nuevas, guias_actualizadas, transportadora, detalle",
-          )
-          .order("created_at", { ascending: false })
-          .limit(20),
-      ]);
+    const hace6Dias = new Date(Date.now() - 6 * 86400000)
+      .toISOString()
+      .split("T")[0];
+
+    const [
+      statsRes,
+      asesorRes,
+      estadoRes,
+      recientesRes,
+      syncRes,
+      criticasRes,
+      entregadasRes,
+      todasRes,
+    ] = await Promise.all([
+      supabase.from("dashboard_stats").select("*").single(),
+      supabase.rpc("guias_por_asesor"),
+      supabase.rpc("guias_por_estado"),
+      supabase
+        .from("guias")
+        .select(
+          "numero_guia, transportadora, transportadora_nombre, estado, fecha_guia, ciudad_destino, clientes(nombre, usuarios(nombre))",
+        )
+        .order("created_at", { ascending: false })
+        .limit(8),
+      supabase
+        .from("sync_log")
+        .select(
+          "created_at, guias_nuevas, guias_actualizadas, transportadora, detalle",
+        )
+        .order("created_at", { ascending: false })
+        .limit(20),
+      supabase
+        .from("guias")
+        .select(
+          "id, numero_guia, transportadora, transportadora_nombre, factura_indurruedas, estado, fecha_guia, ciudad_destino, clientes(nombre, usuarios(nombre))",
+        )
+        .eq("activa", true)
+        .neq("estado", "entregado")
+        .neq("estado", "anulada")
+        .lt("fecha_guia", hace6Dias)
+        .order("fecha_guia", { ascending: true })
+        .limit(50),
+      supabase
+        .from("guias")
+        .select(
+          "transportadora, transportadora_nombre, dias_habiles, ciudad_destino",
+        )
+        .eq("estado", "entregado")
+        .not("dias_habiles", "is", null)
+        .limit(2000),
+      supabase
+        .from("guias")
+        .select("transportadora, transportadora_nombre, fecha_guia")
+        .not("fecha_guia", "is", null)
+        .gte(
+          "fecha_guia",
+          new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0],
+        )
+        .limit(5000),
+    ]);
+
     if (statsRes.data) setStats(statsRes.data);
     setPorAsesor(asesorRes.data || []);
     setPorEstado(estadoRes.data || []);
     setUltimasGuias(recientesRes.data || []);
+    setGuiasCriticas(criticasRes.data || []);
 
-    // Clasificar ultimas sincronizaciones por tipo
     const logs = syncRes.data || [];
-    const bot = logs.find((l) => l.detalle?.tipo === "bot_rastreo");
-    const excelEstelar = logs.find(
-      (l) =>
-        l.transportadora === "estelar" && l.detalle?.tipo !== "bot_rastreo",
+    setSyncs({
+      bot: logs.find((l) => l.detalle?.tipo === "bot_rastreo"),
+      excel_estelar: logs.find(
+        (l) =>
+          l.transportadora === "estelar" && l.detalle?.tipo !== "bot_rastreo",
+      ),
+      excel_tcc: logs.find((l) => l.transportadora === "tcc"),
+    });
+
+    // Tiempos promedio por transportadora + ciudad
+    const guiasEntregadas = entregadasRes.data || [];
+    const porTrans = {};
+    for (const g of guiasEntregadas) {
+      const key =
+        g.transportadora_nombre ||
+        (g.transportadora === "estelar"
+          ? "Estelar Express"
+          : g.transportadora === "tcc"
+            ? "TCC"
+            : g.transportadora);
+      if (!porTrans[key])
+        porTrans[key] = { total: 0, sumDias: 0, ciudades: {} };
+      porTrans[key].total++;
+      porTrans[key].sumDias += g.dias_habiles || 0;
+      const ciudad = g.ciudad_destino || "Sin ciudad";
+      if (!porTrans[key].ciudades[ciudad])
+        porTrans[key].ciudades[ciudad] = { total: 0, sumDias: 0 };
+      porTrans[key].ciudades[ciudad].total++;
+      porTrans[key].ciudades[ciudad].sumDias += g.dias_habiles || 0;
+    }
+    setTiemposTrans(
+      Object.entries(porTrans)
+        .map(([nombre, d]) => ({
+          nombre,
+          total: d.total,
+          promedio: Math.round(d.sumDias / d.total),
+          ciudades: Object.entries(d.ciudades)
+            .map(([ciudad, c]) => ({
+              ciudad,
+              total: c.total,
+              promedio: Math.round(c.sumDias / c.total),
+            }))
+            .filter((c) => c.total >= 2)
+            .sort((a, b) => b.total - a.total)
+            .slice(0, 6),
+        }))
+        .sort((a, b) => a.promedio - b.promedio),
     );
-    const excelTcc = logs.find((l) => l.transportadora === "tcc");
-    setSyncs({ bot, excel_estelar: excelEstelar, excel_tcc: excelTcc });
+
+    // Envíos por mes por transportadora (últimos 6 meses)
+    const todasGuias = todasRes.data || [];
+    const meses = {};
+    for (const g of todasGuias) {
+      if (!g.fecha_guia) continue;
+      const mes = g.fecha_guia.substring(0, 7); // YYYY-MM
+      const trans =
+        g.transportadora_nombre ||
+        (g.transportadora === "estelar"
+          ? "Estelar Express"
+          : g.transportadora === "tcc"
+            ? "TCC"
+            : "Otra");
+      if (!meses[mes]) meses[mes] = {};
+      if (!meses[mes][trans]) meses[mes][trans] = 0;
+      meses[mes][trans]++;
+    }
+    const mesesOrdenados = Object.keys(meses).sort();
+    const transportadoras = [
+      ...new Set(
+        todasGuias.map(
+          (g) =>
+            g.transportadora_nombre ||
+            (g.transportadora === "estelar"
+              ? "Estelar Express"
+              : g.transportadora === "tcc"
+                ? "TCC"
+                : "Otra"),
+        ),
+      ),
+    ];
+    setEnviosMes({ meses: mesesOrdenados, transportadoras, datos: meses });
+
     setLoading(false);
   }
 
@@ -86,6 +216,8 @@ export default function Dashboard() {
       </div>
     );
 
+  const maxTiempo = Math.max(...tiemposTrans.map((t) => t.promedio), 1);
+
   return (
     <div>
       <PageHeader
@@ -93,6 +225,156 @@ export default function Dashboard() {
         subtitle="Resumen de guías y envíos activos"
       />
 
+      {/* Banner críticas */}
+      {guiasCriticas.length > 0 && (
+        <div
+          style={{
+            background: "#1a0800",
+            border: "1px solid var(--danger)",
+            borderRadius: "10px",
+            padding: "14px 16px",
+            marginBottom: "16px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "10px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "16px" }}>🚨</span>
+              <span
+                style={{
+                  fontSize: "13px",
+                  fontWeight: "500",
+                  color: "var(--danger)",
+                }}
+              >
+                {guiasCriticas.length} guía{guiasCriticas.length > 1 ? "s" : ""}{" "}
+                con más de 6 días sin entrega
+              </span>
+            </div>
+            <button
+              onClick={() => navigate("/guias?estado=criticas")}
+              style={{
+                fontSize: "11px",
+                padding: "5px 12px",
+                background: "var(--danger)",
+                color: "#fff",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+                fontWeight: "500",
+              }}
+            >
+              Ver todas →
+            </button>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "5px",
+              maxHeight: "200px",
+              overflowY: "auto",
+            }}
+          >
+            {guiasCriticas.map((g) => {
+              const dias = g.fecha_guia
+                ? Math.floor((new Date() - new Date(g.fecha_guia)) / 86400000)
+                : 0;
+              return (
+                <div
+                  key={g.id}
+                  onClick={() => navigate("/guias?buscar=" + g.numero_guia)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    padding: "7px 10px",
+                    background: "rgba(255,68,68,0.07)",
+                    borderRadius: "6px",
+                    flexWrap: "wrap",
+                    cursor: "pointer",
+                  }}
+                  onMouseEnter={(e) =>
+                    (e.currentTarget.style.background = "rgba(255,68,68,0.18)")
+                  }
+                  onMouseLeave={(e) =>
+                    (e.currentTarget.style.background = "rgba(255,68,68,0.07)")
+                  }
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: "11px",
+                      color: "var(--danger)",
+                      fontWeight: "700",
+                      minWidth: "100px",
+                    }}
+                  >
+                    {g.numero_guia}
+                  </span>
+                  {g.transportadora === "otra" ? (
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        color: "#AA88FF",
+                        background: "#1a0a2e",
+                        padding: "2px 6px",
+                        borderRadius: "10px",
+                        border: "1px solid #3d1a66",
+                      }}
+                    >
+                      {g.transportadora_nombre
+                        ?.split(" ")
+                        .slice(0, 2)
+                        .join(" ")}
+                    </span>
+                  ) : (
+                    <PillTransportadora transportadora={g.transportadora} />
+                  )}
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      color: "var(--wht2)",
+                      flex: 1,
+                      minWidth: "120px",
+                    }}
+                  >
+                    {g.clientes?.nombre || "—"}
+                  </span>
+                  <span style={{ fontSize: "11px", color: "var(--gray)" }}>
+                    {g.ciudad_destino || "—"}
+                  </span>
+                  <span style={{ fontSize: "11px", color: "var(--gray)" }}>
+                    {g.clientes?.usuarios?.nombre || "—"}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: "12px",
+                      fontWeight: "700",
+                      color: "var(--danger)",
+                      background: "rgba(255,68,68,0.2)",
+                      padding: "2px 8px",
+                      borderRadius: "4px",
+                    }}
+                  >
+                    {dias}d
+                  </span>
+                  <PillEstado estado={g.estado} />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* KPIs */}
       <div
         style={{
           display: "grid",
@@ -119,13 +401,14 @@ export default function Dashboard() {
           accent={stats.con_novedad > 0 ? "var(--warn)" : undefined}
         />
         <KPICard
-          label="+10 días sin entrega"
-          value={stats.criticas}
+          label="+6 días sin entrega"
+          value={guiasCriticas.length}
           sub="Críticas"
-          accent={stats.criticas > 0 ? "var(--danger)" : undefined}
+          accent={guiasCriticas.length > 0 ? "var(--danger)" : undefined}
         />
       </div>
 
+      {/* Asesor + Estado */}
       <div
         style={{
           display: "grid",
@@ -153,9 +436,6 @@ export default function Dashboard() {
           >
             Guías activas por asesor
           </div>
-          {porAsesor.length === 0 && (
-            <p style={{ fontSize: "12px", color: "var(--gray)" }}>Sin datos</p>
-          )}
           {porAsesor.map(({ nombre, total }) => (
             <div
               key={nombre}
@@ -211,7 +491,6 @@ export default function Dashboard() {
             </div>
           ))}
         </div>
-
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <div
             style={{
@@ -326,7 +605,392 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Panel de sincronizaciones */}
+      {/* Gráfica: días promedio por transportadora */}
+      {tiemposTrans.length > 0 && (
+        <div
+          style={{
+            background: "var(--blk2)",
+            border: "1px solid var(--blk4)",
+            borderRadius: "10px",
+            padding: "20px",
+            marginBottom: "16px",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "13px",
+              fontWeight: "500",
+              color: "var(--wht)",
+              marginBottom: "4px",
+            }}
+          >
+            Tiempo promedio de entrega por transportadora
+          </div>
+          <div
+            style={{
+              fontSize: "10px",
+              color: "var(--gray)",
+              marginBottom: "20px",
+            }}
+          >
+            Días hábiles promedio · verde ≤3 · naranja ≤6 · rojo {">"} 6
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: "24px",
+              alignItems: "flex-end",
+              height: "160px",
+              marginBottom: "20px",
+            }}
+          >
+            {tiemposTrans.map((t, i) => {
+              const color =
+                t.promedio <= 3
+                  ? "var(--m)"
+                  : t.promedio <= 6
+                    ? "var(--warn)"
+                    : "var(--danger)";
+              const altura = `${Math.max(20, (t.promedio / maxTiempo) * 100)}%`;
+              return (
+                <div
+                  key={t.nombre}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    flex: 1,
+                    height: "100%",
+                    justifyContent: "flex-end",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "14px",
+                      fontWeight: "700",
+                      fontFamily: "var(--font-mono)",
+                      color,
+                      marginBottom: "4px",
+                    }}
+                  >
+                    {t.promedio}d
+                  </div>
+                  <div
+                    style={{
+                      width: "100%",
+                      height: altura,
+                      background: color,
+                      borderRadius: "6px 6px 0 0",
+                      opacity: 0.85,
+                      minHeight: "20px",
+                      position: "relative",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "9px",
+                        color: "rgba(0,0,0,0.7)",
+                        fontWeight: "700",
+                      }}
+                    >
+                      {t.total}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "9px",
+                      color: "var(--gray)",
+                      marginTop: "6px",
+                      textAlign: "center",
+                      maxWidth: "80px",
+                      lineHeight: 1.3,
+                    }}
+                  >
+                    {t.nombre.split(" ").slice(0, 2).join(" ")}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Detalle ciudades por transportadora */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px,1fr))",
+              gap: "12px",
+              borderTop: "1px solid var(--blk4)",
+              paddingTop: "16px",
+            }}
+          >
+            {tiemposTrans.map((t, ti) => (
+              <div key={t.nombre}>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: "500",
+                    color: "var(--wht2)",
+                    marginBottom: "8px",
+                  }}
+                >
+                  {t.nombre}
+                </div>
+                {t.ciudades.map((c) => {
+                  const cColor =
+                    c.promedio <= 3
+                      ? "var(--m)"
+                      : c.promedio <= 6
+                        ? "var(--warn)"
+                        : "var(--danger)";
+                  const maxC = Math.max(
+                    ...t.ciudades.map((x) => x.promedio),
+                    1,
+                  );
+                  return (
+                    <div key={c.ciudad} style={{ marginBottom: "6px" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          fontSize: "10px",
+                          marginBottom: "2px",
+                        }}
+                      >
+                        <span
+                          style={{
+                            color: "var(--gray)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            maxWidth: "120px",
+                          }}
+                        >
+                          {c.ciudad}
+                        </span>
+                        <span
+                          style={{
+                            color: cColor,
+                            fontFamily: "var(--font-mono)",
+                            fontWeight: "500",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {c.promedio}d · {c.total}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          height: "4px",
+                          background: "var(--blk3)",
+                          borderRadius: "2px",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <div
+                          style={{
+                            height: "100%",
+                            width: `${(c.promedio / maxC) * 100}%`,
+                            background: cColor,
+                            borderRadius: "2px",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+                {t.ciudades.length === 0 && (
+                  <div style={{ fontSize: "10px", color: "var(--gray)" }}>
+                    Sin datos por ciudad aún
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Gráfica: envíos por mes por transportadora */}
+      {enviosMes.meses?.length > 0 && (
+        <div
+          style={{
+            background: "var(--blk2)",
+            border: "1px solid var(--blk4)",
+            borderRadius: "10px",
+            padding: "20px",
+            marginBottom: "16px",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "13px",
+              fontWeight: "500",
+              color: "var(--wht)",
+              marginBottom: "4px",
+            }}
+          >
+            Envíos por mes por transportadora
+          </div>
+          <div
+            style={{
+              fontSize: "10px",
+              color: "var(--gray)",
+              marginBottom: "16px",
+            }}
+          >
+            Últimos 6 meses
+          </div>
+
+          {/* Leyenda */}
+          <div
+            style={{
+              display: "flex",
+              gap: "16px",
+              flexWrap: "wrap",
+              marginBottom: "16px",
+            }}
+          >
+            {enviosMes.transportadoras?.map((t, i) => (
+              <div
+                key={t}
+                style={{ display: "flex", alignItems: "center", gap: "5px" }}
+              >
+                <div
+                  style={{
+                    width: "10px",
+                    height: "10px",
+                    borderRadius: "2px",
+                    background: COLORES[i % COLORES.length],
+                  }}
+                ></div>
+                <span style={{ fontSize: "10px", color: "var(--gray)" }}>
+                  {t}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Barras agrupadas */}
+          <div
+            style={{
+              display: "flex",
+              gap: "8px",
+              alignItems: "flex-end",
+              overflowX: "auto",
+              paddingBottom: "8px",
+            }}
+          >
+            {enviosMes.meses?.map((mes) => {
+              const datosMes = enviosMes.datos[mes] || {};
+              const maxMes = Math.max(
+                ...(enviosMes.transportadoras?.map((t) => datosMes[t] || 0) || [
+                  1,
+                ]),
+                1,
+              );
+              const totalMes = enviosMes.transportadoras?.reduce(
+                (s, t) => s + (datosMes[t] || 0),
+                0,
+              );
+              return (
+                <div
+                  key={mes}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    minWidth: "80px",
+                    flex: 1,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "3px",
+                      alignItems: "flex-end",
+                      height: "120px",
+                      width: "100%",
+                    }}
+                  >
+                    {enviosMes.transportadoras?.map((t, i) => {
+                      const val = datosMes[t] || 0;
+                      const h =
+                        val > 0
+                          ? `${Math.max(8, (val / maxMes) * 100)}%`
+                          : "0px";
+                      return (
+                        <div
+                          key={t}
+                          style={{
+                            flex: 1,
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                            height: "100%",
+                          }}
+                        >
+                          {val > 0 && (
+                            <div
+                              style={{
+                                fontSize: "8px",
+                                color: COLORES[i % COLORES.length],
+                                marginBottom: "2px",
+                                fontFamily: "var(--font-mono)",
+                              }}
+                            >
+                              {val}
+                            </div>
+                          )}
+                          <div
+                            style={{
+                              width: "100%",
+                              height: h,
+                              background: COLORES[i % COLORES.length],
+                              borderRadius: "3px 3px 0 0",
+                              opacity: 0.85,
+                            }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div
+                    style={{
+                      height: "1px",
+                      background: "var(--blk4)",
+                      width: "100%",
+                    }}
+                  ></div>
+                  <div
+                    style={{
+                      fontSize: "9px",
+                      color: "var(--gray)",
+                      marginTop: "5px",
+                      textAlign: "center",
+                    }}
+                  >
+                    {format(new Date(mes + "-01"), "MMM yy", { locale: es })}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "9px",
+                      color: "var(--wht3)",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  >
+                    {totalMes}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Syncs */}
       <div
         style={{
           display: "grid",
@@ -342,7 +1006,7 @@ export default function Dashboard() {
             data: syncs.bot,
             color: "var(--m)",
             detalle: syncs.bot
-              ? `${syncs.bot.guias_actualizadas} estados actualizados · ${syncs.bot.detalle?.total_rastreadas || 0} rastreadas`
+              ? `${syncs.bot.guias_actualizadas} estados actualizados`
               : null,
           },
           {
@@ -414,13 +1078,14 @@ export default function Dashboard() {
               </>
             ) : (
               <div style={{ fontSize: "11px", color: "var(--gray)" }}>
-                Sin registros aun
+                Sin registros aún
               </div>
             )}
           </div>
         ))}
       </div>
 
+      {/* Guías recientes */}
       <div
         style={{
           background: "var(--blk2)",
@@ -505,7 +1170,25 @@ export default function Dashboard() {
                     borderBottom: "1px solid var(--blk3)",
                   }}
                 >
-                  <PillTransportadora transportadora={g.transportadora} />
+                  {g.transportadora === "otra" ? (
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        padding: "2px 6px",
+                        borderRadius: "20px",
+                        background: "#1a0a2e",
+                        border: "1px solid #3d1a66",
+                        color: "#AA88FF",
+                      }}
+                    >
+                      {g.transportadora_nombre
+                        ?.split(" ")
+                        .slice(0, 2)
+                        .join(" ") || "Otra"}
+                    </span>
+                  ) : (
+                    <PillTransportadora transportadora={g.transportadora} />
+                  )}
                 </td>
                 <td
                   style={{

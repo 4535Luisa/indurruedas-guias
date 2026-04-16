@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import * as XLSX from "xlsx";
 import {
   supabase,
@@ -136,6 +137,10 @@ export default function Guias() {
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [pagina, setPagina] = useState(1);
+  const [searchParams] = useSearchParams();
+  const [filtroCriticas, setFiltroCriticas] = useState(
+    searchParams.get("estado") === "criticas",
+  );
   const [filtroTexto, setFiltroTexto] = useState("");
   const [busqueda, setBusqueda] = useState("");
   const [filtroTransp, setFiltroTransp] = useState("");
@@ -164,7 +169,14 @@ export default function Guias() {
   }, []);
   useEffect(() => {
     cargarGuias();
-  }, [pagina, busqueda, filtroTransp, filtroEstado, filtroAsesor]);
+  }, [
+    pagina,
+    busqueda,
+    filtroTransp,
+    filtroEstado,
+    filtroAsesor,
+    filtroCriticas,
+  ]);
   useEffect(() => {
     const t = setTimeout(() => {
       setBusqueda(filtroTexto);
@@ -213,6 +225,16 @@ export default function Guias() {
       q = q.eq("transportadora_id", filtroTransp);
     }
     if (filtroEstado) q = q.eq("estado", filtroEstado);
+    if (filtroCriticas) {
+      const hace6Dias = new Date(Date.now() - 6 * 86400000)
+        .toISOString()
+        .split("T")[0];
+      q = q
+        .eq("activa", true)
+        .neq("estado", "entregado")
+        .neq("estado", "anulada")
+        .lt("fecha_guia", hace6Dias);
+    }
     const { data, count } = await q;
     let resultado = data || [];
     if (filtroAsesor === "sin_asesor") {
@@ -743,6 +765,39 @@ export default function Guias() {
       </PageHeader>
 
       <BarraProgreso progreso={progreso} />
+
+      {filtroCriticas && (
+        <div
+          style={{
+            background: "#1a0800",
+            border: "1px solid var(--danger)",
+            borderRadius: "8px",
+            padding: "10px 14px",
+            marginBottom: "14px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <span style={{ fontSize: "12px", color: "var(--danger)" }}>
+            🚨 Mostrando solo guías con más de 6 días sin entrega
+          </span>
+          <button
+            onClick={() => setFiltroCriticas(false)}
+            style={{
+              background: "transparent",
+              border: "1px solid var(--danger)",
+              borderRadius: "5px",
+              color: "var(--danger)",
+              fontSize: "11px",
+              padding: "3px 10px",
+              cursor: "pointer",
+            }}
+          >
+            Quitar filtro ×
+          </button>
+        </div>
+      )}
 
       {uploadResult && !progreso.activo && (
         <div
