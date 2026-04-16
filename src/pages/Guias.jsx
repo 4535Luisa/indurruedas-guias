@@ -142,6 +142,7 @@ export default function Guias() {
   const [filtroEstado, setFiltroEstado] = useState("");
   const [filtroAsesor, setFiltroAsesor] = useState("");
   const [asesores, setAsesores] = useState([]);
+  const [transportadorasFiltro, setTransportadorasFiltro] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [guiaDetalle, setGuiaDetalle] = useState(null);
@@ -159,6 +160,7 @@ export default function Guias() {
 
   useEffect(() => {
     cargarAsesores();
+    cargarTransportadoras();
   }, []);
   useEffect(() => {
     cargarGuias();
@@ -180,6 +182,15 @@ export default function Guias() {
     setAsesores(data || []);
   }
 
+  async function cargarTransportadoras() {
+    const { data } = await supabase
+      .from("transportadoras")
+      .select("id, nombre")
+      .eq("activa", true)
+      .order("nombre");
+    setTransportadorasFiltro(data || []);
+  }
+
   async function cargarGuias() {
     setLoading(true);
     const desde = (pagina - 1) * POR_PAGINA;
@@ -187,7 +198,7 @@ export default function Guias() {
     let q = supabase
       .from("guias")
       .select(
-        "id, numero_guia, transportadora, factura_indurruedas, estado, fecha_guia, fecha_entrega, dias_habiles, ciudad_destino, direccion_entrega, destinatario, clientes(id, nombre, nit, asesor_id, usuarios(id, nombre))",
+        "id, numero_guia, transportadora, transportadora_nombre, transportadora_id, factura_indurruedas, estado, fecha_guia, fecha_entrega, dias_habiles, ciudad_destino, direccion_entrega, destinatario, clientes(id, nombre, nit, asesor_id, usuarios(id, nombre))",
         { count: "exact" },
       )
       .order("created_at", { ascending: false })
@@ -196,7 +207,11 @@ export default function Guias() {
       q = q.or(
         `numero_guia.ilike.%${busqueda}%,factura_indurruedas.ilike.%${busqueda}%,destinatario.ilike.%${busqueda}%,ciudad_destino.ilike.%${busqueda}%`,
       );
-    if (filtroTransp) q = q.eq("transportadora", filtroTransp);
+    if (filtroTransp === "estelar" || filtroTransp === "tcc") {
+      q = q.eq("transportadora", filtroTransp);
+    } else if (filtroTransp) {
+      q = q.eq("transportadora_id", filtroTransp);
+    }
     if (filtroEstado) q = q.eq("estado", filtroEstado);
     const { data, count } = await q;
     let resultado = data || [];
@@ -631,7 +646,16 @@ export default function Guias() {
     setExportando(false);
   }
 
-  async function actualizarEstado(guiaId, nuevoEstado) {
+  const [modalFechaEntrega, setModalFechaEntrega] = useState(null); // { guiaId, fechaActual }
+  const [fechaEntregaModal, setFechaEntregaModal] = useState("");
+
+  async function actualizarEstado(guiaId, nuevoEstado, guia) {
+    if (nuevoEstado === "entregado") {
+      // Abrir modal para escoger fecha
+      setFechaEntregaModal(new Date().toISOString().split("T")[0]);
+      setModalFechaEntrega({ guiaId, guia });
+      return;
+    }
     await supabase
       .from("guias")
       .update({ estado: nuevoEstado })
@@ -639,6 +663,47 @@ export default function Guias() {
     setGuias((prev) =>
       prev.map((g) => (g.id === guiaId ? { ...g, estado: nuevoEstado } : g)),
     );
+  }
+
+  async function confirmarEntrega() {
+    const { guiaId, guia } = modalFechaEntrega;
+    const fechaGuia = guia.fecha_guia ? new Date(guia.fecha_guia) : null;
+    const fechaFin = new Date(fechaEntregaModal);
+    const dias = fechaGuia
+      ? Math.floor((fechaFin - fechaGuia) / 86400000)
+      : null;
+
+    await supabase
+      .from("guias")
+      .update({
+        estado: "entregado",
+        fecha_entrega: fechaEntregaModal,
+        dias_habiles: dias,
+        activa: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", guiaId);
+
+    await supabase.from("historial_estados").insert({
+      guia_id: guiaId,
+      estado_anterior: guia.estado,
+      estado_nuevo: "entregado",
+      fuente: "admin",
+    });
+
+    setGuias((prev) =>
+      prev.map((g) =>
+        g.id === guiaId
+          ? {
+              ...g,
+              estado: "entregado",
+              fecha_entrega: fechaEntregaModal,
+              dias_habiles: dias,
+            }
+          : g,
+      ),
+    );
+    setModalFechaEntrega(null);
   }
 
   const totalPaginas = Math.ceil(total / POR_PAGINA);
@@ -734,6 +799,11 @@ export default function Guias() {
           <option value="">Todas las transportadoras</option>
           <option value="estelar">Estelar Express</option>
           <option value="tcc">TCC</option>
+          {transportadorasFiltro.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.nombre}
+            </option>
+          ))}
         </select>
         <select
           value={filtroEstado}
@@ -846,7 +916,29 @@ export default function Guias() {
                         </span>
                       </Td>
                       <Td>
-                        <PillTransportadora transportadora={g.transportadora} />
+                        {g.transportadora === "otra" ? (
+                          <span
+                            style={{
+                              fontSize: "10px",
+                              padding: "2px 7px",
+                              borderRadius: "20px",
+                              background: "#1a0a2e",
+                              border: "1px solid #3d1a66",
+                              color: "#AA88FF",
+                              whiteSpace: "nowrap",
+                              fontWeight: "500",
+                            }}
+                          >
+                            {g.transportadora_nombre
+                              ?.split(" ")
+                              .slice(0, 2)
+                              .join(" ") || "Otra"}
+                          </span>
+                        ) : (
+                          <PillTransportadora
+                            transportadora={g.transportadora}
+                          />
+                        )}
                       </Td>
                       <Td
                         style={{
@@ -933,7 +1025,7 @@ export default function Guias() {
                         <select
                           value={g.estado}
                           onChange={(e) =>
-                            actualizarEstado(g.id, e.target.value)
+                            actualizarEstado(g.id, e.target.value, g)
                           }
                           style={{
                             fontSize: "10px",
@@ -1054,6 +1146,110 @@ export default function Guias() {
           onClose={() => setGuiaAsignar(null)}
           onAsignado={() => cargarGuias()}
         />
+      )}
+
+      {/* Modal fecha de entrega */}
+      {modalFechaEntrega && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.75)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+          }}
+          onClick={() => setModalFechaEntrega(null)}
+        >
+          <div
+            style={{
+              background: "var(--blk2)",
+              border: "1px solid var(--blk4)",
+              borderRadius: "12px",
+              width: "100%",
+              maxWidth: "380px",
+              padding: "24px",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                fontSize: "15px",
+                fontWeight: "500",
+                color: "var(--wht)",
+                marginBottom: "4px",
+              }}
+            >
+              ¿Cuándo fue entregado?
+            </div>
+            <div
+              style={{
+                fontSize: "12px",
+                color: "var(--gray)",
+                marginBottom: "20px",
+              }}
+            >
+              {modalFechaEntrega.guia?.clientes?.nombre ||
+                modalFechaEntrega.guia?.destinatario ||
+                modalFechaEntrega.guia?.numero_guia}
+            </div>
+            <div style={{ marginBottom: "20px" }}>
+              <label
+                style={{
+                  fontSize: "10px",
+                  color: "var(--gray)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".05em",
+                  display: "block",
+                  marginBottom: "6px",
+                }}
+              >
+                Fecha de entrega
+              </label>
+              <input
+                type="date"
+                value={fechaEntregaModal}
+                onChange={(e) => setFechaEntregaModal(e.target.value)}
+                max={new Date().toISOString().split("T")[0]}
+                style={{ width: "100%", fontSize: "14px", padding: "10px" }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                onClick={confirmarEntrega}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  background: "var(--m)",
+                  color: "var(--blk)",
+                  border: "none",
+                  borderRadius: "7px",
+                  fontSize: "13px",
+                  fontWeight: "500",
+                  cursor: "pointer",
+                }}
+              >
+                ✓ Confirmar entrega
+              </button>
+              <button
+                onClick={() => setModalFechaEntrega(null)}
+                style={{
+                  padding: "10px 16px",
+                  background: "transparent",
+                  border: "1px solid var(--blk5)",
+                  borderRadius: "7px",
+                  color: "var(--gray)",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
