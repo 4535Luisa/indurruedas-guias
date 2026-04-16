@@ -146,6 +146,9 @@ export default function Layout() {
           <NavLink to="/clientes" style={linkStyle}>
             <span>◉</span> Clientes
           </NavLink>
+          <NavLink to="/planilla" style={linkStyle}>
+            <span>◐</span> Subir planilla
+          </NavLink>
           <NavLink to="/usuarios" style={linkStyle}>
             <span>◎</span> Usuarios
           </NavLink>

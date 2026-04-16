@@ -6,6 +6,9 @@ import Guias from "./pages/Guias";
 import Clientes from "./pages/Clientes";
 import Usuarios from "./pages/Usuarios";
 import AsesorGuias from "./pages/AsesorGuias";
+import TransportadorGuias from "./pages/TransportadorGuias";
+import VisualizadorDashboard from "./pages/VisualizadorDashboard";
+import SubirPlanilla from "./pages/SubirPlanilla";
 import Layout from "./components/Layout";
 
 function Loading() {
@@ -30,15 +33,12 @@ function Loading() {
 export default function App() {
   const { user, perfil, loading } = useAuth();
   if (loading) return <Loading />;
-
-  if (!user) {
+  if (!user)
     return (
       <Routes>
         <Route path="*" element={<Login />} />
       </Routes>
     );
-  }
-
   if (!perfil) return <Loading />;
 
   if (perfil.rol === "admin") {
@@ -49,16 +49,43 @@ export default function App() {
           <Route path="/guias" element={<Guias />} />
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/usuarios" element={<Usuarios />} />
+          <Route path="/planilla" element={<SubirPlanilla />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
       </Routes>
     );
   }
 
+  if (perfil.rol === "asesor") {
+    return (
+      <Routes>
+        <Route path="/mis-guias" element={<AsesorGuias />} />
+        <Route path="*" element={<Navigate to="/mis-guias" replace />} />
+      </Routes>
+    );
+  }
+
+  if (perfil.rol === "transportador") {
+    return (
+      <Routes>
+        <Route path="/entregas" element={<TransportadorGuias />} />
+        <Route path="*" element={<Navigate to="/entregas" replace />} />
+      </Routes>
+    );
+  }
+
+  if (perfil.rol === "visualizador") {
+    return (
+      <Routes>
+        <Route path="/visualizador" element={<VisualizadorDashboard />} />
+        <Route path="*" element={<Navigate to="/visualizador" replace />} />
+      </Routes>
+    );
+  }
+
   return (
     <Routes>
-      <Route path="/mis-guias" element={<AsesorGuias />} />
-      <Route path="*" element={<Navigate to="/mis-guias" replace />} />
+      <Route path="*" element={<Login />} />
     </Routes>
   );
 }
