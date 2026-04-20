@@ -371,16 +371,15 @@ export default function Guias() {
         const clienteId = await buscarClienteConCache(nit, destinatario);
 
         if (existentesMap[numeroGuia]) {
-          // Ya existe — el bot actualiza el estado, el Excel solo actualiza factura si faltaba
-          if (!existentesMap[numeroGuia].factura_indurruedas && factura) {
-            porActualizar.push({
-              id: existentesMap[numeroGuia].id,
-              factura_indurruedas: factura,
-            });
-          }
-          // No tocamos el estado — el bot es el encargado
+          porActualizar.push({
+            id: existentesMap[numeroGuia].id,
+            estado,
+            factura_indurruedas:
+              factura || existentesMap[numeroGuia].factura_indurruedas,
+            fecha_entrega: fechaEntrega,
+            dias_habiles: diasHabiles,
+          });
         } else {
-          // Nueva guía — insertar con estado inicial del Excel
           porInsertar.push({
             numero_guia: numeroGuia,
             transportadora: "estelar",
@@ -393,7 +392,7 @@ export default function Guias() {
             fecha_guia: fechaGuia,
             fecha_entrega: fechaEntrega,
             dias_habiles: diasHabiles,
-            activa: true,
+            activa: estado !== "entregado",
           });
         }
       }
