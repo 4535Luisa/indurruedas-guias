@@ -47,7 +47,12 @@ export default function Layout() {
 
   return (
     <div
-      style={{ display: "flex", minHeight: "100vh", background: "var(--blk)" }}
+      style={{
+        display: "flex",
+        height: "100vh",
+        overflow: "hidden",
+        background: "var(--blk)",
+      }}
     >
       <aside
         style={{
@@ -57,6 +62,8 @@ export default function Layout() {
           display: "flex",
           flexDirection: "column",
           flexShrink: 0,
+          height: "100vh",
+          overflow: "hidden",
         }}
       >
         <div
@@ -271,8 +278,8 @@ export default function Layout() {
         </div>
       </aside>
 
-      <main style={{ flex: 1, overflow: "auto" }}>
-        <div style={{ padding: "24px" }}>
+      <main style={{ flex: 1, overflow: "auto", height: "100vh" }}>
+        <div style={{ padding: "24px", paddingBottom: "70px" }}>
           <Outlet />
         </div>
       </main>

@@ -1118,13 +1118,14 @@ export default function Guias() {
 
           <div
             style={{
-              position: "sticky",
+              position: "fixed",
               bottom: 0,
+              left: "220px",
+              right: 0,
               zIndex: 10,
-              background: "var(--blk)",
+              background: "var(--blk2)",
               borderTop: "1px solid var(--blk4)",
-              padding: "10px 0",
-              marginTop: "8px",
+              padding: "10px 24px",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
@@ -1189,6 +1190,8 @@ export default function Guias() {
               </Btn>
             </div>
           </div>
+          {/* Espacio para que el contenido no quede tapado por la paginación fija */}
+          <div style={{ height: "52px" }} />
         </>
       )}
 
