@@ -1,10 +1,7 @@
 /**
  * BOT RASTREO ESTELAR EXPRESS
- * Entra a la pagina publica de rastreo, busca cada guia activa
- * y actualiza el estado en Supabase
- *
- * Ejecutar: node estelar-bot.js
- * GitHub Actions: 3 veces al dia automaticamente
+ * URL directa: https://estelarexpress.gelotra.com/rastrearguia?iframe=SI
+ * Corre cada 3 horas L-S 7AM-5PM Colombia
  */
 
 import { chromium } from "playwright";
@@ -15,10 +12,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY,
 );
 
-const URL_RASTREO =
-  "https://estelarexpress.co/index.php/atencion-al-cliente/rastreo-de-guia";
+const URL_RASTREO = "https://estelarexpress.gelotra.com/rastrearguia?iframe=SI";
 
-// Mapeo de estados de trazabilidad Estelar → sistema
 const MAPEO_ESTADOS = {
   aforada: "en_transito",
   despachada: "en_transito",
@@ -39,186 +34,120 @@ const MAPEO_ESTADOS = {
   devolucion: "novedad",
 };
 
-function mapearEstado(textoTrazabilidad) {
-  if (!textoTrazabilidad) return null;
-  const lower = textoTrazabilidad.toLowerCase();
+function mapearEstado(texto) {
+  if (!texto) return null;
+  const lower = texto.toLowerCase();
   for (const [clave, estado] of Object.entries(MAPEO_ESTADOS)) {
     if (lower.includes(clave)) return estado;
   }
   return null;
 }
 
-async function sleep(ms) {
+function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
 async function rastrearGuia(page, numeroGuia) {
   try {
-    // Ir a la pagina de rastreo
-    await page.goto(URL_RASTREO, {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
-    await sleep(2000);
+    await page.goto(URL_RASTREO, { waitUntil: "networkidle", timeout: 45000 });
+    await sleep(3000);
 
-    // Buscar el campo de texto - puede estar en iframe
-    let campo = null;
-    let frame = page;
-
-    // Intentar encontrar el campo en iframes
-    const iframes = page.frames();
-    for (const f of iframes) {
-      try {
-        const input = await f.$(
-          'input[type="text"], input[placeholder*="guia"], input[placeholder*="guía"], input[name*="guia"], input[name*="remision"]',
-        );
-        if (input) {
-          campo = input;
-          frame = f;
-          break;
-        }
-      } catch {}
-    }
-
-    // Si no encontro en iframe, buscar en pagina principal
-    if (!campo) {
-      campo = await page.$(
-        'input[type="text"], input[placeholder*="guia"], input[placeholder*="guía"]',
-      );
-    }
+    // Buscar campo de texto con timeout generoso
+    const campo = await page
+      .waitForSelector(
+        'input[type="text"], input[name*="guia"], input[placeholder*="guia"], input[placeholder*="guía"], input[id*="guia"]',
+        { timeout: 15000 },
+      )
+      .catch(() => null);
 
     if (!campo) {
-      console.log(`  ⚠️  ${numeroGuia}: no se encontro campo de busqueda`);
+      console.log(`  ⚠️  ${numeroGuia}: no se encontró campo de búsqueda`);
       return null;
     }
 
-    // Limpiar e ingresar el numero de guia
-    await campo.click({ clickCount: 3 });
+    await campo.click({ timeout: 10000 });
     await campo.fill(numeroGuia);
     await sleep(500);
 
-    // Buscar y hacer clic en el boton de rastrear
-    let boton = null;
-    try {
-      boton = await frame.$(
-        'button:has-text("Rastrear"), button:has-text("rastrear"), input[type="submit"], button[type="submit"]',
-      );
-    } catch {}
-
+    // Buscar botón rastrear con timeout
+    const boton = await page
+      .$(
+        'button[type="submit"], input[type="submit"], button:has-text("Rastrear"), button:has-text("rastrear"), button:has-text("Buscar")',
+      )
+      .catch(() => null);
     if (boton) {
-      await boton.click();
+      await boton.click({ timeout: 10000 });
     } else {
       await campo.press("Enter");
     }
 
-    await sleep(3000);
+    // Esperar que cargue la respuesta
+    await sleep(5000);
 
-    // Leer la trazabilidad - buscar los items del historial
-    let ultimoEstadoTexto = null;
+    // Leer trazabilidad
+    const contenido = await page.textContent("body").catch(() => "");
+    if (!contenido) return null;
 
-    // Intentar en el frame donde esta el formulario
-    const frames2 = page.frames();
-    for (const f of frames2) {
-      try {
-        // Buscar elementos de trazabilidad
-        const items = await f.$$(
-          ".trazabilidad tr td, .tracking-item, li, .timeline-item, table tr",
-        );
-        if (items.length > 0) {
-          // Tomar el ultimo item (estado mas reciente)
-          const textos = [];
-          for (const item of items) {
-            const texto = await item.textContent();
-            if (
-              texto &&
-              texto.trim().length > 5 &&
-              texto.toLowerCase().includes("mercanc")
-            ) {
-              textos.push(texto.trim());
-            }
-          }
-          if (textos.length > 0) {
-            ultimoEstadoTexto = textos[textos.length - 1];
-            break;
-          }
-        }
-      } catch {}
-    }
+    const lineas = contenido
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 5);
+    const lineasEstado = lineas.filter((l) => {
+      const lower = l.toLowerCase();
+      return (
+        lower.includes("mercanc") ||
+        lower.includes("reparto") ||
+        lower.includes("cumplido") ||
+        lower.includes("entregad") ||
+        lower.includes("devuelto") ||
+        lower.includes("novedad") ||
+        lower.includes("aforad") ||
+        lower.includes("despachad") ||
+        lower.includes("muellex") ||
+        lower.includes("recibido")
+      );
+    });
 
-    // Si no encontro en items especificos, buscar texto en pagina
-    if (!ultimoEstadoTexto) {
-      for (const f of frames2) {
-        try {
-          const contenido = await f.textContent("body");
-          if (contenido && contenido.toLowerCase().includes("trazabilidad")) {
-            // Extraer lineas con estados conocidos
-            const lineas = contenido
-              .split("\n")
-              .map((l) => l.trim())
-              .filter((l) => l.length > 10);
-            const lineasEstado = lineas.filter(
-              (l) =>
-                l.toLowerCase().includes("mercanc") ||
-                l.toLowerCase().includes("reparto") ||
-                l.toLowerCase().includes("cumplido") ||
-                l.toLowerCase().includes("entregad") ||
-                l.toLowerCase().includes("devuelto"),
-            );
-            if (lineasEstado.length > 0) {
-              ultimoEstadoTexto = lineasEstado[lineasEstado.length - 1];
-              break;
-            }
-          }
-        } catch {}
-      }
-    }
-
-    if (!ultimoEstadoTexto) {
-      console.log(`  ⚠️  ${numeroGuia}: no se pudo leer trazabilidad`);
+    if (lineasEstado.length === 0) {
+      console.log(`  ⚠️  ${numeroGuia}: sin trazabilidad encontrada`);
       return null;
     }
 
-    const estado = mapearEstado(ultimoEstadoTexto);
+    const ultimoEstado = lineasEstado[lineasEstado.length - 1];
+    const estado = mapearEstado(ultimoEstado);
     console.log(
-      `  📦 ${numeroGuia}: "${ultimoEstadoTexto.substring(0, 60)}" → ${estado || "sin mapeo"}`,
+      `  📦 ${numeroGuia}: "${ultimoEstado.substring(0, 60)}" → ${estado || "sin mapeo"}`,
     );
-    return estado;
+    return { estado, textoOriginal: ultimoEstado };
   } catch (err) {
-    console.log(`  ❌ ${numeroGuia}: error - ${err.message.substring(0, 80)}`);
+    console.log(`  ❌ ${numeroGuia}: ${err.message.substring(0, 80)}`);
     return null;
   }
 }
 
 async function main() {
   const inicio = new Date();
-  console.log("🤖 Bot Estelar Express iniciando —", inicio.toISOString());
+  console.log("🤖 Bot Estelar Express —", inicio.toISOString());
 
-  let actualizadas = 0;
-  let sinCambios = 0;
-  let errores = 0;
-  const cambios = [];
-
-  // Obtener guias activas de Estelar que NO esten entregadas
+  // Obtener guías activas de Estelar que NO estén entregadas
   const { data: guias, error } = await supabase
     .from("guias")
     .select("id, numero_guia, estado")
     .eq("transportadora", "estelar")
-    .eq("activa", true)
-    .neq("estado", "entregado");
+    .neq("estado", "entregado")
+    .neq("estado", "anulada")
+    .not("fecha_guia", "is", null);
 
   if (error) {
-    console.error("Error consultando Supabase:", error.message);
+    console.error("Error Supabase:", error.message);
     process.exit(1);
   }
-
-  console.log(`📋 ${guias.length} guias activas de Estelar a rastrear`);
-
+  console.log(`📋 ${guias.length} guías activas de Estelar`);
   if (guias.length === 0) {
-    console.log("✅ No hay guias activas para rastrear");
+    console.log("✅ Nada que rastrear");
     return;
   }
 
-  // Lanzar Playwright
   const browser = await chromium.launch({
     headless: true,
     args: [
@@ -227,74 +156,72 @@ async function main() {
       "--disable-dev-shm-usage",
     ],
   });
-
   const context = await browser.newContext({
     userAgent:
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
     viewport: { width: 1280, height: 800 },
   });
-
   const page = await context.newPage();
 
-  // Procesar guias en lotes para no sobrecargar el servidor
-  const LOTE = 5;
+  let actualizadas = 0,
+    sinCambios = 0,
+    errores = 0;
+  const cambios = [];
+
   for (let i = 0; i < guias.length; i++) {
     const guia = guias[i];
-    console.log(
-      `\n[${i + 1}/${guias.length}] Rastreando ${guia.numero_guia}...`,
-    );
+    console.log(`\n[${i + 1}/${guias.length}] ${guia.numero_guia}`);
 
-    const nuevoEstado = await rastrearGuia(page, guia.numero_guia);
+    const resultado = await rastrearGuia(page, guia.numero_guia);
 
-    if (!nuevoEstado) {
+    if (!resultado?.estado) {
       errores++;
       continue;
     }
-
-    if (nuevoEstado === guia.estado) {
+    if (resultado.estado === guia.estado) {
       sinCambios++;
       continue;
     }
 
     // Actualizar en Supabase
+    const updates = {
+      estado: resultado.estado,
+      activa: resultado.estado !== "entregado",
+      updated_at: new Date().toISOString(),
+    };
+
     const { error: updateError } = await supabase
       .from("guias")
-      .update({
-        estado: nuevoEstado,
-        activa: nuevoEstado !== "entregado",
-        updated_at: new Date().toISOString(),
-      })
+      .update(updates)
       .eq("id", guia.id);
 
     if (!updateError) {
-      // Registrar en historial
       await supabase.from("historial_estados").insert({
         guia_id: guia.id,
         estado_anterior: guia.estado,
-        estado_nuevo: nuevoEstado,
+        estado_nuevo: resultado.estado,
         fuente: "bot",
       });
       actualizadas++;
-      cambios.push({ guia: guia.numero_guia, de: guia.estado, a: nuevoEstado });
-      console.log(`  ✅ Actualizada: ${guia.estado} → ${nuevoEstado}`);
+      cambios.push({
+        guia: guia.numero_guia,
+        de: guia.estado,
+        a: resultado.estado,
+      });
+      console.log(`  ✅ ${guia.estado} → ${resultado.estado}`);
     } else {
       errores++;
-      console.log(`  ❌ Error guardando:`, updateError.message);
+      console.log(`  ❌ Error guardando: ${updateError.message}`);
     }
 
-    // Pausa entre guias para no saturar el servidor
-    if ((i + 1) % LOTE === 0 && i < guias.length - 1) {
-      console.log(`\n⏳ Pausa de 3 segundos...`);
-      await sleep(3000);
-    } else {
-      await sleep(1000);
-    }
+    // Pausa entre guías para no saturar el servidor
+    await sleep(2500);
   }
 
   await browser.close();
 
-  // Registrar en sync_log
   const duracion = Math.round((new Date() - inicio) / 1000);
+
   await supabase.from("sync_log").insert({
     transportadora: "estelar",
     guias_nuevas: 0,
@@ -310,11 +237,11 @@ async function main() {
   });
 
   console.log("\n📊 RESUMEN:");
-  console.log(`   Total rastreadas: ${guias.length}`);
-  console.log(`   Actualizadas:     ${actualizadas}`);
-  console.log(`   Sin cambios:      ${sinCambios}`);
-  console.log(`   Errores:          ${errores}`);
-  console.log(`   Duracion:         ${duracion}s`);
+  console.log(`   Rastreadas:   ${guias.length}`);
+  console.log(`   Actualizadas: ${actualizadas}`);
+  console.log(`   Sin cambios:  ${sinCambios}`);
+  console.log(`   Errores:      ${errores}`);
+  console.log(`   Duración:     ${duracion}s`);
   console.log("✅ Bot finalizado —", new Date().toISOString());
 }
 

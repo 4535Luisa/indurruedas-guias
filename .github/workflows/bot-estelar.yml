@@ -2,9 +2,12 @@ name: Bot Rastreo Estelar Express
 
 on:
   schedule:
+    # Colombia UTC-5 → 7AM=12UTC, 10AM=15UTC, 1PM=18UTC, 4PM=21UTC
+    # Lunes a Sábado
     - cron: "0 12 * * 1-6"
-    - cron: "0 17 * * 1-6"
-    - cron: "0 23 * * 1-6"
+    - cron: "0 15 * * 1-6"
+    - cron: "0 18 * * 1-6"
+    - cron: "0 21 * * 1-6"
   workflow_dispatch:
 
 jobs:
@@ -22,7 +25,7 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Instalar dependencias bot
+      - name: Instalar dependencias
         working-directory: ./bot
         run: npm install
 
@@ -35,11 +38,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: |
-          echo "SUPABASE_URL definida: ${{ secrets.SUPABASE_URL != '' }}"
-          echo "SUPABASE_SERVICE_KEY definida: ${{ secrets.SUPABASE_SERVICE_KEY != '' }}"
-          node estelar-bot.js
+        run: node estelar-bot.js
 
-      - name: Notificar resultado
+      - name: Resultado
         if: always()
-        run: echo "Bot finalizado"
+        run: echo "Bot finalizado - ver logs arriba"
