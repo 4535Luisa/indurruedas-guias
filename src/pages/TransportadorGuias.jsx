@@ -15,6 +15,7 @@ export default function TransportadorGuias() {
   const [filtroEstado, setFiltroEstado] = useState("en_transito");
   const [modalEntrega, setModalEntrega] = useState(null);
   const [modalNovedad, setModalNovedad] = useState(null);
+  const [modalFoto, setModalFoto] = useState(null);
   const [fechaEntrega, setFechaEntrega] = useState(
     new Date().toISOString().split("T")[0],
   );
@@ -121,6 +122,58 @@ export default function TransportadorGuias() {
     const reader = new FileReader();
     reader.onload = (ev) => setFotoPreview(ev.target.result);
     reader.readAsDataURL(file);
+    // Si selecciona foto, abrir modal de entrega automáticamente
+    if (!modalEntrega) {
+      setFechaEntrega(new Date().toISOString().split("T")[0]);
+    }
+  }
+
+  async function subirSoloFoto(guia) {
+    if (!fotoFile) return;
+    setGuardando(true);
+    const ext = fotoFile.name.split(".").pop();
+    const path = `evidencias/${guia.id}_${Date.now()}.${ext}`;
+    const { data: uploadData, error: uploadErr } = await supabase.storage
+      .from("evidencias")
+      .upload(path, fotoFile, { upsert: true });
+
+    if (uploadErr) {
+      setGuardando(false);
+      return;
+    }
+
+    const { data: urlData } = supabase.storage
+      .from("evidencias")
+      .getPublicUrl(path);
+    const fotoUrl = urlData.publicUrl;
+
+    const fechaGuia = guia.fecha_guia ? new Date(guia.fecha_guia) : new Date();
+    const dias = Math.floor((new Date(fechaEntrega) - fechaGuia) / 86400000);
+
+    await supabase
+      .from("guias")
+      .update({
+        estado: "entregado",
+        fecha_entrega: fechaEntrega,
+        dias_habiles: dias,
+        activa: false,
+        foto_evidencia: fotoUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", guia.id);
+
+    await supabase.from("historial_estados").insert({
+      guia_id: guia.id,
+      estado_anterior: guia.estado,
+      estado_nuevo: "entregado",
+      fuente: "transportador",
+    });
+
+    setModalFoto(null);
+    setFotoFile(null);
+    setFotoPreview(null);
+    cargarGuias();
+    setGuardando(false);
   }
 
   const filtradas = guias.filter((g) => {
@@ -399,6 +452,27 @@ export default function TransportadorGuias() {
                         </button>
                         <button
                           onClick={() => {
+                            setModalFoto(g);
+                            setFechaEntrega(
+                              new Date().toISOString().split("T")[0],
+                            );
+                            setFotoFile(null);
+                            setFotoPreview(null);
+                          }}
+                          style={{
+                            fontSize: "11px",
+                            padding: "5px 10px",
+                            background: "#1a3300",
+                            color: "var(--m)",
+                            border: "1px solid var(--m)",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          📸 Foto
+                        </button>
+                        <button
+                          onClick={() => {
                             setModalEntrega(g);
                             setFechaEntrega(
                               new Date().toISOString().split("T")[0],
@@ -543,7 +617,177 @@ export default function TransportadorGuias() {
         )}
       </div>
 
-      {/* Modal entrega */}
+      {/* Modal foto = entregado */}
+      {modalFoto && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.75)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+          }}
+          onClick={() => setModalFoto(null)}
+        >
+          <div
+            style={{
+              background: "var(--blk2)",
+              border: "1px solid var(--blk4)",
+              borderRadius: "12px",
+              width: "100%",
+              maxWidth: "420px",
+              padding: "24px",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                fontSize: "15px",
+                fontWeight: "500",
+                color: "var(--wht)",
+                marginBottom: "4px",
+              }}
+            >
+              📸 Foto de entrega
+            </div>
+            <div
+              style={{
+                fontSize: "12px",
+                color: "var(--gray)",
+                marginBottom: "20px",
+              }}
+            >
+              {modalFoto.factura_indurruedas} —{" "}
+              {modalFoto.clientes?.nombre || modalFoto.destinatario}
+            </div>
+
+            <div style={{ marginBottom: "16px" }}>
+              <label
+                style={{
+                  fontSize: "10px",
+                  color: "var(--gray)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".05em",
+                  display: "block",
+                  marginBottom: "5px",
+                }}
+              >
+                Fecha de entrega
+              </label>
+              <input
+                type="date"
+                value={fechaEntrega}
+                onChange={(e) => setFechaEntrega(e.target.value)}
+                max={new Date().toISOString().split("T")[0]}
+                style={{ width: "100%", fontSize: "14px", padding: "10px" }}
+              />
+            </div>
+
+            <div style={{ marginBottom: "16px" }}>
+              <label
+                style={{
+                  fontSize: "10px",
+                  color: "var(--gray)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".05em",
+                  display: "block",
+                  marginBottom: "5px",
+                }}
+              >
+                Toma la foto de la factura firmada
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={seleccionarFoto}
+                style={{
+                  width: "100%",
+                  fontSize: "12px",
+                  padding: "8px",
+                  background: "var(--blk3)",
+                  border: "2px dashed var(--m)",
+                  borderRadius: "8px",
+                  color: "var(--wht2)",
+                  cursor: "pointer",
+                }}
+              />
+              {fotoPreview && (
+                <img
+                  src={fotoPreview}
+                  alt="Preview"
+                  style={{
+                    marginTop: "10px",
+                    width: "100%",
+                    maxHeight: "250px",
+                    objectFit: "contain",
+                    borderRadius: "8px",
+                    border: "1px solid var(--blk4)",
+                  }}
+                />
+              )}
+            </div>
+
+            <div
+              style={{
+                background: "var(--m-dim)",
+                border: "1px solid var(--m-dim2)",
+                borderRadius: "7px",
+                padding: "10px",
+                marginBottom: "16px",
+                fontSize: "11px",
+                color: "var(--m)",
+              }}
+            >
+              ✅ Al subir la foto, la guía quedará marcada como{" "}
+              <strong>Entregada</strong> automáticamente
+            </div>
+
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                onClick={() => subirSoloFoto(modalFoto)}
+                disabled={guardando || !fotoFile}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  background: fotoFile ? "var(--m)" : "var(--blk4)",
+                  color: fotoFile ? "var(--blk)" : "var(--gray)",
+                  border: "none",
+                  borderRadius: "7px",
+                  fontSize: "13px",
+                  fontWeight: "500",
+                  cursor: fotoFile ? "pointer" : "not-allowed",
+                }}
+              >
+                {guardando
+                  ? "Subiendo..."
+                  : fotoFile
+                    ? "📸 Subir foto y marcar entregado"
+                    : "Selecciona una foto"}
+              </button>
+              <button
+                onClick={() => setModalFoto(null)}
+                style={{
+                  padding: "10px 14px",
+                  background: "transparent",
+                  border: "1px solid var(--blk5)",
+                  borderRadius: "7px",
+                  color: "var(--gray)",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal entrega sin foto */}
       {modalEntrega && (
         <div
           style={{
