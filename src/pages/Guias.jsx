@@ -210,7 +210,7 @@ export default function Guias() {
     let q = supabase
       .from("guias")
       .select(
-        "id, numero_guia, transportadora, transportadora_nombre, transportadora_id, factura_indurruedas, estado, fecha_guia, fecha_entrega, dias_habiles, ciudad_destino, direccion_entrega, destinatario, clientes(id, nombre, nit, asesor_id, usuarios(id, nombre))",
+        "id, numero_guia, transportadora, transportadora_nombre, transportadora_id, factura_indurruedas, estado, estado_transportadora, fecha_guia, fecha_entrega, dias_habiles, ciudad_destino, direccion_entrega, destinatario, clientes(id, nombre, nit, asesor_id, usuarios(id, nombre))",
         { count: "exact" },
       )
       .order("created_at", { ascending: false })
@@ -515,16 +515,14 @@ export default function Guias() {
         const numeroGuia = String(row["Nro. de Remision TCC"] || "").trim();
         const factura = String(row["Documento Cliente"] || "").trim() || null;
         const fechaGuia = parsearFechaTCC(row["Fecha(dd/mm/aaaa)"]);
-        const estado = normalizarEstadoTCC(
-          String(row["Donde esta su paquete ?"] || ""),
-        );
+        const estadoRaw = String(row["Donde esta su paquete ?"] || "").trim();
+        const estado = normalizarEstadoTCC(estadoRaw);
         const destinatario = String(row["Destinatario"] || "").trim();
         const direccion = String(row["Direccion"] || "").trim();
         const destino = String(row["Destino"] || "")
           .split("-")[0]
           .trim();
         const diasExcel = parseInt(row["Dias de entrega (habiles)"]) || null;
-        // Entregado: usar días del Excel. En tránsito: calcular desde fecha generación hasta hoy
         const diasHabiles =
           estado === "entregado"
             ? diasExcel
@@ -534,23 +532,25 @@ export default function Guias() {
         const clienteId = await buscarClienteConCache(null, destinatario);
 
         if (existentesMap[numeroGuia]) {
-          if (existentesMap[numeroGuia].estado !== estado) {
-            porActualizar.push({
-              id: existentesMap[numeroGuia].id,
-              estado,
-              dias_habiles: diasHabiles,
-            });
-          }
+          porActualizar.push({
+            id: existentesMap[numeroGuia].id,
+            estado,
+            estado_transportadora: estadoRaw,
+            dias_habiles: diasHabiles,
+          });
         } else {
           const fechaEntregaTCC =
             estado === "entregado" && row["Fecha de Entrega(dd/mm/aaaa)"]
-              ? String(row["Fecha de Entrega(dd/mm/aaaa)"]).split(" ")[0]
+              ? parsearFechaTCC(
+                  String(row["Fecha de Entrega(dd/mm/aaaa)"]).split(" ")[0],
+                )
               : null;
           porInsertar.push({
             numero_guia: numeroGuia,
             transportadora: "tcc",
             factura_indurruedas: factura,
             estado,
+            estado_transportadora: estadoRaw,
             cliente_id: clienteId,
             destinatario,
             direccion_entrega: direccion,
@@ -572,9 +572,30 @@ export default function Guias() {
       const LOTE = 50;
       for (let i = 0; i < porInsertar.length; i += LOTE) {
         const lote = porInsertar.slice(i, i + LOTE);
-        const { error } = await supabase.from("guias").insert(lote);
-        if (!error) nuevas += lote.length;
-        else errores += lote.length;
+        const { error: insertErr } = await supabase.from("guias").insert(lote);
+        if (!insertErr) {
+          nuevas += lote.length;
+        } else {
+          console.error("Error lote TCC:", insertErr.message);
+          // Intentar uno por uno
+          for (const g of lote) {
+            const { error: e2 } = await supabase.from("guias").insert([g]);
+            if (!e2) nuevas++;
+            else {
+              errores++;
+              console.error(
+                "Error guia:",
+                g.numero_guia,
+                "|",
+                e2.message,
+                "| estado:",
+                g.estado,
+                "| estado_trans:",
+                g.estado_transportadora,
+              );
+            }
+          }
+        }
         setProgreso((p) => ({
           ...p,
           actual: Math.min(i + LOTE, porInsertar.length),
@@ -587,20 +608,24 @@ export default function Guias() {
         actual: 0,
         total: porActualizar.length,
       }));
-      for (let i = 0; i < porActualizar.length; i += LOTE) {
-        const lote = porActualizar.slice(i, i + LOTE);
-        for (const g of lote) {
-          const { id, ...datos } = g;
-          await supabase
-            .from("guias")
-            .update({ ...datos, updated_at: new Date().toISOString() })
-            .eq("id", id);
-          actualizadas++;
+      for (let i = 0; i < porActualizar.length; i++) {
+        const g = porActualizar[i];
+        const { id, ...datos } = g;
+        const { error: updateErr } = await supabase
+          .from("guias")
+          .update({ ...datos, updated_at: new Date().toISOString() })
+          .eq("id", id);
+        if (!updateErr) actualizadas++;
+        else {
+          errores++;
+          console.error(
+            "Error actualizando:",
+            id,
+            updateErr.message,
+            JSON.stringify(datos),
+          );
         }
-        setProgreso((p) => ({
-          ...p,
-          actual: Math.min(i + LOTE, porActualizar.length),
-        }));
+        setProgreso((p) => ({ ...p, actual: i + 1 }));
       }
 
       await supabase
@@ -1076,7 +1101,27 @@ export default function Guias() {
                         </span>
                       </Td>
                       <Td>
-                        <PillEstado estado={g.estado} />
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "3px",
+                          }}
+                        >
+                          <PillEstado estado={g.estado} />
+                          {g.transportadora === "tcc" &&
+                            g.estado_transportadora && (
+                              <span
+                                style={{
+                                  fontSize: "9px",
+                                  color: "var(--gray)",
+                                  fontStyle: "italic",
+                                }}
+                              >
+                                {g.estado_transportadora}
+                              </span>
+                            )}
+                        </div>
                       </Td>
                       <Td>
                         <select

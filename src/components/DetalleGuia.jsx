@@ -166,6 +166,17 @@ export default function DetalleGuia({ guia, onClose }) {
               >
                 {cfg.label}
               </div>
+              {guia.estado_transportadora && guia.transportadora === "tcc" && (
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "var(--gray)",
+                    marginTop: "2px",
+                  }}
+                >
+                  Estado TCC: {guia.estado_transportadora}
+                </div>
+              )}
               <div
                 style={{
                   fontSize: "10px",

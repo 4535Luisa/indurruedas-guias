@@ -61,13 +61,17 @@ export const TRANSPORTADORAS = {
 };
 
 export const MAPEO_ESTADOS_TCC = {
+  "entregada al reexpedidor": "entregado",
   entregada: "entregado",
   entregado: "entregado",
   "en proceso de entrega": "en_transito",
   "en proceso de traslado": "en_transito",
+  "env\u00edo en instalaciones tcc destino": "pendiente",
   "envio en instalaciones tcc destino": "pendiente",
+  "en instalaciones tcc": "pendiente",
   "remesa informada a tcc": "informada",
   "mercancia no despachada por el remitente": "anulada",
+  "mercanc\u00eda no despachada por el remitente": "anulada",
 };
 
 export function normalizarEstadoTCC(estadoRaw) {
