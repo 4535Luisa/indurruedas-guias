@@ -44,10 +44,21 @@ const DESCRIPCIONES = {
 
 export default function DetalleGuia({ guia, onClose }) {
   const [historial, setHistorial] = useState([]);
+  const [guiaData, setGuiaData] = useState(guia);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!guia) return;
+    // Cargar guía completa con foto y novedad
+    supabase
+      .from("guias")
+      .select("*, clientes(nombre, nit, usuarios(nombre))")
+      .eq("id", guia.id)
+      .single()
+      .then(({ data }) => {
+        if (data) setGuiaData(data);
+      });
+    // Cargar historial
     supabase
       .from("historial_estados")
       .select("*")
@@ -59,13 +70,14 @@ export default function DetalleGuia({ guia, onClose }) {
       });
   }, [guia]);
 
-  if (!guia) return null;
+  if (!guiaData) return null;
 
-  const dias = guia.fecha_guia
-    ? Math.floor((new Date() - new Date(guia.fecha_guia)) / 86400000)
+  const g = guiaData;
+  const dias = g.fecha_guia
+    ? Math.floor((new Date() - new Date(g.fecha_guia)) / 86400000)
     : 0;
-  const cfg = ESTADOS[guia.estado] || ESTADOS["en_transito"];
-  const desc = DESCRIPCIONES[guia.estado] || DESCRIPCIONES["en_transito"];
+  const cfg = ESTADOS[g.estado] || ESTADOS["en_transito"];
+  const desc = DESCRIPCIONES[g.estado] || DESCRIPCIONES["en_transito"];
 
   return (
     <div
@@ -118,9 +130,9 @@ export default function DetalleGuia({ guia, onClose }) {
                 color: "var(--wht)",
               }}
             >
-              {guia.numero_guia}
+              {g.numero_guia}
             </span>
-            <PillTransportadora transportadora={guia.transportadora} />
+            <PillTransportadora transportadora={g.transportadora} />
           </div>
           <button
             onClick={onClose}
@@ -166,7 +178,7 @@ export default function DetalleGuia({ guia, onClose }) {
               >
                 {cfg.label}
               </div>
-              {guia.estado_transportadora && guia.transportadora === "tcc" && (
+              {g.estado_transportadora && g.transportadora === "tcc" && (
                 <div
                   style={{
                     fontSize: "11px",
@@ -174,7 +186,7 @@ export default function DetalleGuia({ guia, onClose }) {
                     marginTop: "2px",
                   }}
                 >
-                  Estado TCC: {guia.estado_transportadora}
+                  Estado TCC: {g.estado_transportadora}
                 </div>
               )}
               <div
@@ -200,6 +212,74 @@ export default function DetalleGuia({ guia, onClose }) {
           </p>
         </div>
 
+        {/* Novedad descripcion */}
+        {g.novedad_descripcion && (
+          <div
+            style={{
+              margin: "0 20px 16px",
+              background: "rgba(255,170,0,0.1)",
+              border: "1px solid rgba(255,170,0,0.3)",
+              borderRadius: "8px",
+              padding: "12px",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "10px",
+                color: "var(--warn)",
+                textTransform: "uppercase",
+                letterSpacing: ".05em",
+                marginBottom: "5px",
+              }}
+            >
+              ⚠️ Novedad reportada
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--wht2)" }}>
+              {g.novedad_descripcion}
+            </div>
+          </div>
+        )}
+
+        {/* Foto evidencia */}
+        {g.foto_evidencia && (
+          <div style={{ margin: "0 20px 16px" }}>
+            <div
+              style={{
+                fontSize: "10px",
+                color: "var(--gray)",
+                textTransform: "uppercase",
+                letterSpacing: ".05em",
+                marginBottom: "8px",
+              }}
+            >
+              📸 Foto de entrega
+            </div>
+            <a href={g.foto_evidencia} target="_blank" rel="noreferrer">
+              <img
+                src={g.foto_evidencia}
+                alt="Evidencia de entrega"
+                style={{
+                  width: "100%",
+                  maxHeight: "300px",
+                  objectFit: "contain",
+                  borderRadius: "8px",
+                  border: "1px solid var(--blk4)",
+                  cursor: "pointer",
+                }}
+              />
+            </a>
+            <div
+              style={{
+                fontSize: "10px",
+                color: "var(--gray)",
+                marginTop: "4px",
+              }}
+            >
+              Clic para ver en tamaño completo
+            </div>
+          </div>
+        )}
+
         {/* Info */}
         <div
           style={{
@@ -217,20 +297,18 @@ export default function DetalleGuia({ guia, onClose }) {
             {[
               {
                 label: "Cliente",
-                value: guia.clientes?.nombre || guia.destinatario || "—",
+                value: g.clientes?.nombre || g.destinatario || "—",
               },
               {
                 label: "Factura Indurruedas",
-                value: guia.factura_indurruedas || "—",
+                value: g.factura_indurruedas || "—",
               },
-              { label: "Ciudad destino", value: guia.ciudad_destino || "—" },
-              { label: "Dirección", value: guia.direccion_entrega || "—" },
+              { label: "Ciudad destino", value: g.ciudad_destino || "—" },
+              { label: "Dirección", value: g.direccion_entrega || "—" },
               {
                 label: "Fecha generación",
-                value: guia.fecha_guia
-                  ? format(parseISO(guia.fecha_guia), "d MMM yyyy", {
-                      locale: es,
-                    })
+                value: g.fecha_guia
+                  ? format(parseISO(g.fecha_guia), "d MMM yyyy", { locale: es })
                   : "—",
               },
               {
@@ -243,11 +321,8 @@ export default function DetalleGuia({ guia, onClose }) {
                       ? "var(--warn)"
                       : "var(--m)",
               },
-              {
-                label: "Asesor",
-                value: guia.clientes?.usuarios?.nombre || "—",
-              },
-              { label: "NIT cliente", value: guia.clientes?.nit || "—" },
+              { label: "Asesor", value: g.clientes?.usuarios?.nombre || "—" },
+              { label: "NIT cliente", value: g.clientes?.nit || "—" },
             ].map(({ label, value, color }) => (
               <div key={label}>
                 <div

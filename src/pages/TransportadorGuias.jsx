@@ -14,9 +14,13 @@ export default function TransportadorGuias() {
   const [filtroTexto, setFiltroTexto] = useState("");
   const [filtroEstado, setFiltroEstado] = useState("en_transito");
   const [modalEntrega, setModalEntrega] = useState(null);
+  const [modalNovedad, setModalNovedad] = useState(null);
   const [fechaEntrega, setFechaEntrega] = useState(
     new Date().toISOString().split("T")[0],
   );
+  const [novedadDesc, setNovedadDesc] = useState("");
+  const [fotoFile, setFotoFile] = useState(null);
+  const [fotoPreview, setFotoPreview] = useState(null);
   const [guardando, setGuardando] = useState(false);
 
   useEffect(() => {
@@ -25,11 +29,10 @@ export default function TransportadorGuias() {
 
   async function cargarGuias() {
     setLoading(true);
-    // El transportador ve solo las guías de su transportadora
     const { data } = await supabase
       .from("guias")
       .select(
-        "id, numero_guia, factura_indurruedas, estado, fecha_guia, fecha_entrega, dias_habiles, ciudad_destino, direccion_entrega, destinatario, transportadora_nombre, clientes(nombre)",
+        "id, numero_guia, factura_indurruedas, estado, estado_transportadora, fecha_guia, fecha_entrega, dias_habiles, ciudad_destino, direccion_entrega, destinatario, foto_evidencia, novedad_descripcion, transportadora_nombre, clientes(nombre)",
       )
       .eq("transportadora_id", perfil.transportadora_id)
       .order("fecha_guia", { ascending: false });
@@ -39,9 +42,25 @@ export default function TransportadorGuias() {
 
   async function marcarEntregado(guia) {
     setGuardando(true);
+    let fotoUrl = null;
+
+    // Subir foto si hay
+    if (fotoFile) {
+      const ext = fotoFile.name.split(".").pop();
+      const path = `evidencias/${guia.id}_${Date.now()}.${ext}`;
+      const { data: uploadData, error: uploadErr } = await supabase.storage
+        .from("evidencias")
+        .upload(path, fotoFile, { upsert: true });
+      if (!uploadErr) {
+        const { data: urlData } = supabase.storage
+          .from("evidencias")
+          .getPublicUrl(path);
+        fotoUrl = urlData.publicUrl;
+      }
+    }
+
     const fechaGuia = guia.fecha_guia ? new Date(guia.fecha_guia) : new Date();
-    const fechaFin = new Date(fechaEntrega);
-    const dias = Math.floor((fechaFin - fechaGuia) / 86400000);
+    const dias = Math.floor((new Date(fechaEntrega) - fechaGuia) / 86400000);
 
     await supabase
       .from("guias")
@@ -50,6 +69,7 @@ export default function TransportadorGuias() {
         fecha_entrega: fechaEntrega,
         dias_habiles: dias,
         activa: false,
+        ...(fotoUrl && { foto_evidencia: fotoUrl }),
         updated_at: new Date().toISOString(),
       })
       .eq("id", guia.id);
@@ -62,8 +82,45 @@ export default function TransportadorGuias() {
     });
 
     setModalEntrega(null);
+    setFotoFile(null);
+    setFotoPreview(null);
     cargarGuias();
     setGuardando(false);
+  }
+
+  async function reportarNovedad(guia) {
+    if (!novedadDesc.trim()) return;
+    setGuardando(true);
+
+    await supabase
+      .from("guias")
+      .update({
+        estado: "novedad",
+        novedad_descripcion: novedadDesc,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", guia.id);
+
+    await supabase.from("historial_estados").insert({
+      guia_id: guia.id,
+      estado_anterior: guia.estado,
+      estado_nuevo: "novedad",
+      fuente: "transportador",
+    });
+
+    setModalNovedad(null);
+    setNovedadDesc("");
+    cargarGuias();
+    setGuardando(false);
+  }
+
+  function seleccionarFoto(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setFotoFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setFotoPreview(ev.target.result);
+    reader.readAsDataURL(file);
   }
 
   const filtradas = guias.filter((g) => {
@@ -79,6 +136,7 @@ export default function TransportadorGuias() {
 
   const activas = guias.filter((g) => g.estado === "en_transito").length;
   const entregadas = guias.filter((g) => g.estado === "entregado").length;
+  const novedad = guias.filter((g) => g.estado === "novedad").length;
   const iniciales =
     perfil?.nombre
       ?.split(" ")
@@ -190,7 +248,7 @@ export default function TransportadorGuias() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1fr 1fr",
+            gridTemplateColumns: "repeat(3, 1fr)",
             gap: "10px",
             marginBottom: "16px",
           }}
@@ -198,6 +256,7 @@ export default function TransportadorGuias() {
           {[
             { label: "Por entregar", value: activas, color: "#AA88FF" },
             { label: "Entregadas", value: entregadas, color: "var(--m)" },
+            { label: "Con novedad", value: novedad, color: "var(--warn)" },
           ].map((k) => (
             <div
               key={k.label}
@@ -205,7 +264,7 @@ export default function TransportadorGuias() {
                 background: "var(--blk2)",
                 border: "1px solid var(--blk4)",
                 borderRadius: "8px",
-                padding: "14px",
+                padding: "12px",
               }}
             >
               <div
@@ -221,7 +280,7 @@ export default function TransportadorGuias() {
               </div>
               <div
                 style={{
-                  fontSize: "28px",
+                  fontSize: "24px",
                   fontWeight: "500",
                   fontFamily: "var(--font-mono)",
                   color: k.color,
@@ -260,7 +319,7 @@ export default function TransportadorGuias() {
           </select>
         </div>
 
-        {/* Lista de guías */}
+        {/* Lista */}
         {loading ? (
           <div
             style={{
@@ -284,10 +343,10 @@ export default function TransportadorGuias() {
                   key={g.id}
                   style={{
                     background: "var(--blk2)",
-                    border: `1px solid ${g.estado === "entregado" ? "var(--blk4)" : "#AA88FF44"}`,
+                    border: `1px solid ${g.estado === "novedad" ? "var(--warn)" : "var(--blk4)"}`,
                     borderRadius: "10px",
                     padding: "14px",
-                    borderLeft: `3px solid ${g.estado === "entregado" ? "var(--m)" : "#AA88FF"}`,
+                    borderLeft: `3px solid ${g.estado === "entregado" ? "var(--m)" : g.estado === "novedad" ? "var(--warn)" : "#AA88FF"}`,
                   }}
                 >
                   <div
@@ -320,26 +379,47 @@ export default function TransportadorGuias() {
                       <PillEstado estado={g.estado} />
                     </div>
                     {g.estado === "en_transito" && (
-                      <button
-                        onClick={() => {
-                          setModalEntrega(g);
-                          setFechaEntrega(
-                            new Date().toISOString().split("T")[0],
-                          );
-                        }}
-                        style={{
-                          fontSize: "11px",
-                          padding: "5px 12px",
-                          background: "var(--m)",
-                          color: "var(--blk)",
-                          border: "none",
-                          borderRadius: "6px",
-                          cursor: "pointer",
-                          fontWeight: "500",
-                        }}
-                      >
-                        ✓ Marcar entregado
-                      </button>
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <button
+                          onClick={() => {
+                            setModalNovedad(g);
+                            setNovedadDesc("");
+                          }}
+                          style={{
+                            fontSize: "11px",
+                            padding: "5px 10px",
+                            background: "transparent",
+                            color: "var(--warn)",
+                            border: "1px solid var(--warn)",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          ⚠️ Novedad
+                        </button>
+                        <button
+                          onClick={() => {
+                            setModalEntrega(g);
+                            setFechaEntrega(
+                              new Date().toISOString().split("T")[0],
+                            );
+                            setFotoFile(null);
+                            setFotoPreview(null);
+                          }}
+                          style={{
+                            fontSize: "11px",
+                            padding: "5px 12px",
+                            background: "var(--m)",
+                            color: "var(--blk)",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                            fontWeight: "500",
+                          }}
+                        >
+                          ✓ Entregado
+                        </button>
+                      </div>
                     )}
                   </div>
                   <div
@@ -394,6 +474,42 @@ export default function TransportadorGuias() {
                       {dias} días
                     </span>
                   </div>
+                  {g.novedad_descripcion && (
+                    <div
+                      style={{
+                        marginTop: "8px",
+                        padding: "6px 10px",
+                        background: "rgba(255,170,0,0.1)",
+                        borderRadius: "6px",
+                        fontSize: "11px",
+                        color: "var(--warn)",
+                      }}
+                    >
+                      ⚠️ {g.novedad_descripcion}
+                    </div>
+                  )}
+                  {g.foto_evidencia && (
+                    <div style={{ marginTop: "8px" }}>
+                      <a
+                        href={g.foto_evidencia}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <img
+                          src={g.foto_evidencia}
+                          alt="Evidencia"
+                          style={{
+                            width: "80px",
+                            height: "80px",
+                            objectFit: "cover",
+                            borderRadius: "6px",
+                            border: "1px solid var(--blk4)",
+                            cursor: "pointer",
+                          }}
+                        />
+                      </a>
+                    </div>
+                  )}
                   {g.estado === "entregado" && g.fecha_entrega && (
                     <div
                       style={{
@@ -427,7 +543,7 @@ export default function TransportadorGuias() {
         )}
       </div>
 
-      {/* Modal marcar entregado */}
+      {/* Modal entrega */}
       {modalEntrega && (
         <div
           style={{
@@ -448,7 +564,7 @@ export default function TransportadorGuias() {
               border: "1px solid var(--blk4)",
               borderRadius: "12px",
               width: "100%",
-              maxWidth: "400px",
+              maxWidth: "420px",
               padding: "24px",
             }}
             onClick={(e) => e.stopPropagation()}
@@ -496,6 +612,51 @@ export default function TransportadorGuias() {
               />
             </div>
 
+            <div style={{ marginBottom: "16px" }}>
+              <label
+                style={{
+                  fontSize: "10px",
+                  color: "var(--gray)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".05em",
+                  display: "block",
+                  marginBottom: "5px",
+                }}
+              >
+                📸 Foto de factura firmada (opcional)
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={seleccionarFoto}
+                style={{
+                  width: "100%",
+                  fontSize: "12px",
+                  padding: "6px",
+                  background: "var(--blk3)",
+                  border: "1px solid var(--blk5)",
+                  borderRadius: "6px",
+                  color: "var(--wht2)",
+                  cursor: "pointer",
+                }}
+              />
+              {fotoPreview && (
+                <img
+                  src={fotoPreview}
+                  alt="Preview"
+                  style={{
+                    marginTop: "8px",
+                    width: "100%",
+                    maxHeight: "200px",
+                    objectFit: "contain",
+                    borderRadius: "8px",
+                    border: "1px solid var(--blk4)",
+                  }}
+                />
+              )}
+            </div>
+
             <div style={{ display: "flex", gap: "8px" }}>
               <button
                 onClick={() => marcarEntregado(modalEntrega)}
@@ -516,6 +677,125 @@ export default function TransportadorGuias() {
               </button>
               <button
                 onClick={() => setModalEntrega(null)}
+                style={{
+                  padding: "10px 16px",
+                  background: "transparent",
+                  border: "1px solid var(--blk5)",
+                  borderRadius: "7px",
+                  color: "var(--gray)",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal novedad */}
+      {modalNovedad && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.75)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+          }}
+          onClick={() => setModalNovedad(null)}
+        >
+          <div
+            style={{
+              background: "var(--blk2)",
+              border: "1px solid var(--blk4)",
+              borderRadius: "12px",
+              width: "100%",
+              maxWidth: "420px",
+              padding: "24px",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                fontSize: "15px",
+                fontWeight: "500",
+                color: "var(--warn)",
+                marginBottom: "4px",
+              }}
+            >
+              ⚠️ Reportar novedad
+            </div>
+            <div
+              style={{
+                fontSize: "12px",
+                color: "var(--gray)",
+                marginBottom: "20px",
+              }}
+            >
+              {modalNovedad.factura_indurruedas} —{" "}
+              {modalNovedad.clientes?.nombre || modalNovedad.destinatario}
+            </div>
+
+            <div style={{ marginBottom: "16px" }}>
+              <label
+                style={{
+                  fontSize: "10px",
+                  color: "var(--gray)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".05em",
+                  display: "block",
+                  marginBottom: "5px",
+                }}
+              >
+                ¿Qué pasó?
+              </label>
+              <textarea
+                value={novedadDesc}
+                onChange={(e) => setNovedadDesc(e.target.value)}
+                placeholder="Describe el problema: cliente ausente, dirección incorrecta, mercancía dañada..."
+                rows={4}
+                style={{
+                  width: "100%",
+                  padding: "10px",
+                  background: "var(--blk3)",
+                  border: "1px solid var(--blk5)",
+                  borderRadius: "7px",
+                  color: "var(--wht2)",
+                  fontSize: "13px",
+                  resize: "vertical",
+                  outline: "none",
+                  fontFamily: "var(--font-body)",
+                }}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                onClick={() => reportarNovedad(modalNovedad)}
+                disabled={guardando || !novedadDesc.trim()}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  background: novedadDesc.trim()
+                    ? "var(--warn)"
+                    : "var(--blk4)",
+                  color: novedadDesc.trim() ? "var(--blk)" : "var(--gray)",
+                  border: "none",
+                  borderRadius: "7px",
+                  fontSize: "13px",
+                  fontWeight: "500",
+                  cursor: novedadDesc.trim() ? "pointer" : "not-allowed",
+                }}
+              >
+                {guardando ? "Guardando..." : "⚠️ Reportar novedad"}
+              </button>
+              <button
+                onClick={() => setModalNovedad(null)}
                 style={{
                   padding: "10px 16px",
                   background: "transparent",
