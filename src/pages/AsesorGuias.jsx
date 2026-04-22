@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { PillEstado, PillTransportadora } from "../components/UI";
+import DetalleGuia from "../components/DetalleGuia";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 
@@ -13,6 +14,7 @@ export default function AsesorGuias() {
   const [loading, setLoading] = useState(true);
   const [filtroTexto, setFiltroTexto] = useState("");
   const [filtroEstado, setFiltroEstado] = useState("");
+  const [guiaDetalle, setGuiaDetalle] = useState(null);
 
   useEffect(() => {
     if (perfil) cargarGuias();
@@ -335,11 +337,14 @@ export default function AsesorGuias() {
                         }}
                       >
                         <span
+                          onClick={() => setGuiaDetalle(g)}
                           style={{
                             fontFamily: "var(--font-mono)",
                             fontSize: "12px",
                             fontWeight: "700",
-                            color: "var(--wht)",
+                            color: "var(--m)",
+                            cursor: "pointer",
+                            textDecoration: "underline",
                           }}
                         >
                           {g.numero_guia}
@@ -480,6 +485,9 @@ export default function AsesorGuias() {
           </>
         )}
       </div>
+      {guiaDetalle && (
+        <DetalleGuia guia={guiaDetalle} onClose={() => setGuiaDetalle(null)} />
+      )}
     </div>
   );
 }
