@@ -168,7 +168,7 @@ export default function DetalleGuia({ guia, onClose }) {
             }}
           >
             <span style={{ fontSize: "22px" }}>{desc.icono}</span>
-            <div>
+            <div style={{ flex: 1 }}>
               <div
                 style={{
                   fontSize: "13px",
@@ -178,17 +178,6 @@ export default function DetalleGuia({ guia, onClose }) {
               >
                 {cfg.label}
               </div>
-              {g.estado_transportadora && g.transportadora === "tcc" && (
-                <div
-                  style={{
-                    fontSize: "11px",
-                    color: "var(--gray)",
-                    marginTop: "2px",
-                  }}
-                >
-                  Estado TCC: {g.estado_transportadora}
-                </div>
-              )}
               <div
                 style={{
                   fontSize: "10px",
@@ -196,10 +185,44 @@ export default function DetalleGuia({ guia, onClose }) {
                   marginTop: "1px",
                 }}
               >
-                Estado actual de la guía
+                Estado en el sistema
               </div>
             </div>
           </div>
+          {g.estado_transportadora && (
+            <div
+              style={{
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: "7px",
+                padding: "8px 10px",
+                marginBottom: "8px",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: "10px",
+                  color: "var(--gray)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".05em",
+                }}
+              >
+                Estado real {g.transportadora === "tcc" ? "TCC" : "Estelar"}:
+              </span>
+              <span
+                style={{
+                  fontSize: "12px",
+                  color: cfg.color,
+                  fontWeight: "500",
+                }}
+              >
+                {g.estado_transportadora}
+              </span>
+            </div>
+          )}
           <p
             style={{
               fontSize: "12px",
@@ -254,29 +277,40 @@ export default function DetalleGuia({ guia, onClose }) {
             >
               📸 Foto de entrega
             </div>
-            <a href={g.foto_evidencia} target="_blank" rel="noreferrer">
-              <img
-                src={g.foto_evidencia}
-                alt="Evidencia de entrega"
-                style={{
-                  width: "100%",
-                  maxHeight: "300px",
-                  objectFit: "contain",
-                  borderRadius: "8px",
-                  border: "1px solid var(--blk4)",
-                  cursor: "pointer",
-                }}
-              />
-            </a>
-            <div
+            <img
+              src={g.foto_evidencia}
+              alt="Evidencia de entrega"
               style={{
-                fontSize: "10px",
-                color: "var(--gray)",
-                marginTop: "4px",
+                width: "100%",
+                maxHeight: "300px",
+                objectFit: "contain",
+                borderRadius: "8px",
+                border: "1px solid var(--blk4)",
+              }}
+            />
+            <a
+              href={g.foto_evidencia}
+              download={`entrega-${g.numero_guia}.jpg`}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "6px",
+                marginTop: "8px",
+                padding: "8px",
+                background: "var(--m-dim)",
+                border: "1px solid var(--m-dim2)",
+                borderRadius: "7px",
+                color: "var(--m)",
+                fontSize: "12px",
+                fontWeight: "500",
+                textDecoration: "none",
               }}
             >
-              Clic para ver en tamaño completo
-            </div>
+              ⬇️ Descargar foto
+            </a>
           </div>
         )}
 
