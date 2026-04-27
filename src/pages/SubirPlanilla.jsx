@@ -12,8 +12,13 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 function parsearFecha(str) {
   if (!str) return null;
   // formato dd-mm-yyyy o dd/mm/yyyy
-  const match = str.match(/(\d{2})[-/](\d{2})[-/](\d{4})/);
-  if (match) return `${match[3]}-${match[2]}-${match[1]}`;
+  const match = str.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (match) {
+    const d = match[1].padStart(2, "0");
+    const m = match[2].padStart(2, "0");
+    const y = match[3];
+    return `${y}-${m}-${d}`;
+  }
   return null;
 }
 
@@ -131,8 +136,16 @@ function parsearPlanilla(texto) {
     const ciudadParts = partes
       .filter((p) => p.x >= 230 && p.x < 312)
       .map((p) => p.str);
+    // Dirección: entre x=312 y x=450, excluir números con coma (peso) y $ (valor)
     const dirParts = partes
       .filter((p) => p.x >= 312 && p.x < 450)
+      .filter(
+        (p) =>
+          !p.str.match(/^\d+[\.,]\d+$/) &&
+          !p.str.startsWith("$") &&
+          p.str !== "NO" &&
+          p.str !== "SI",
+      )
       .map((p) => p.str);
 
     const cliente = clienteParts.join(" ").trim();
@@ -233,16 +246,27 @@ export default function SubirPlanilla() {
         continue;
       }
 
-      // Buscar cliente por nombre
+      // Buscar cliente por nombre completo
       let clienteId = null;
-      if (g.cliente) {
-        const palabras = g.cliente.trim().split(" ").slice(0, 2).join(" ");
-        const { data: cli } = await supabase
+      if (g.cliente && g.cliente.trim().length > 2) {
+        const nombreLimpio = g.cliente.trim();
+        // Exacto primero
+        const { data: exacto } = await supabase
           .from("clientes")
           .select("id")
-          .ilike("nombre", `%${palabras}%`)
+          .ilike("nombre", nombreLimpio)
           .limit(1);
-        if (cli?.[0]) clienteId = cli[0].id;
+        if (exacto?.[0]) {
+          clienteId = exacto[0].id;
+        } else {
+          // Conteniendo el nombre completo
+          const { data: parcial } = await supabase
+            .from("clientes")
+            .select("id")
+            .ilike("nombre", `%${nombreLimpio}%`)
+            .limit(1);
+          if (parcial?.[0]) clienteId = parcial[0].id;
+        }
       }
 
       const { error } = await supabase.from("guias").insert({

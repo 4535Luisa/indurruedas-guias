@@ -269,10 +269,14 @@ export default function Guias() {
   const clienteCache = useRef({});
 
   async function buscarClienteConCache(nit, nombre) {
-    const key = nit || nombre;
+    const key =
+      nit && nit !== "nan" && String(nit).length > 3
+        ? `nit:${nit}`
+        : `nombre:${nombre}`;
     if (clienteCache.current[key]) return clienteCache.current[key];
 
-    if (nit && nit !== "nan" && String(nit).length > 3) {
+    // 1. Buscar por NIT exacto primero
+    if (nit && nit !== "nan" && String(nit).trim().length > 3) {
       const { data } = await supabase
         .from("clientes")
         .select("id")
@@ -283,18 +287,34 @@ export default function Guias() {
         return data[0].id;
       }
     }
-    if (nombre) {
-      const palabras = String(nombre).trim().split(" ").slice(0, 2).join(" ");
-      const { data } = await supabase
+
+    // 2. Si no hay NIT, buscar por nombre completo exacto
+    if (nombre && nombre.trim().length > 2) {
+      const nombreLimpio = nombre.trim();
+      // Intentar coincidencia exacta primero
+      const { data: exacto } = await supabase
         .from("clientes")
         .select("id")
-        .ilike("nombre", `%${palabras}%`)
+        .ilike("nombre", nombreLimpio)
         .limit(1);
-      if (data?.[0]) {
-        clienteCache.current[key] = data[0].id;
-        return data[0].id;
+      if (exacto?.[0]) {
+        clienteCache.current[key] = exacto[0].id;
+        return exacto[0].id;
+      }
+
+      // Si no hay exacto, buscar conteniendo el nombre completo
+      const { data: parcial } = await supabase
+        .from("clientes")
+        .select("id")
+        .ilike("nombre", `%${nombreLimpio}%`)
+        .limit(1);
+      if (parcial?.[0]) {
+        clienteCache.current[key] = parcial[0].id;
+        return parcial[0].id;
       }
     }
+
+    clienteCache.current[key] = null;
     return null;
   }
 
@@ -357,13 +377,9 @@ export default function Guias() {
           ? parsearFechaEstelar(row["FECHA ENTREGA"])
           : null;
         const diasExcel = parseInt(row["DIAS ENTREGA"]) || null;
-        // Entregado: usar días del Excel. En tránsito: calcular desde fecha generación hasta hoy
-        const diasHabiles =
-          estado === "entregado"
-            ? diasExcel
-            : fechaGuia
-              ? Math.floor((new Date() - new Date(fechaGuia)) / 86400000)
-              : null;
+        // Solo guardar dias_habiles si está entregado (dato fijo del Excel)
+        // En tránsito = NULL para que el frontend calcule dinámicamente
+        const diasHabiles = estado === "entregado" ? diasExcel : null;
         const destinatario = String(row["DESTINATARIO"] || "").trim();
         const nit = String(row["DOCUMENTO DESTINATARIO"] || "").trim();
         const ciudad = String(row["CIUDAD DESTINO"] || "").trim();
@@ -523,12 +539,9 @@ export default function Guias() {
           .split("-")[0]
           .trim();
         const diasExcel = parseInt(row["Dias de entrega (habiles)"]) || null;
-        const diasHabiles =
-          estado === "entregado"
-            ? diasExcel
-            : fechaGuia
-              ? Math.floor((new Date() - new Date(fechaGuia)) / 86400000)
-              : null;
+        // Solo guardar dias_habiles si está entregado (dato fijo)
+        // En tránsito = NULL para que el frontend calcule dinámicamente
+        const diasHabiles = estado === "entregado" ? diasExcel : null;
         const clienteId = await buscarClienteConCache(null, destinatario);
 
         if (existentesMap[numeroGuia]) {
