@@ -21,6 +21,7 @@ import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 
 const POR_PAGINA = 50;
+const SIMON_ID = "d9a0256c-d556-4506-8724-306c33016a22";
 
 function extraerFacturaEstelar(anexos) {
   if (!anexos) return null;
@@ -160,8 +161,11 @@ export default function Guias() {
     texto: "",
     trans: "",
   });
+  const [modalFechaEntrega, setModalFechaEntrega] = useState(null);
+  const [fechaEntregaModal, setFechaEntregaModal] = useState("");
   const fileEstelarRef = useRef();
   const fileTccRef = useRef();
+  const clienteCache = useRef({});
 
   useEffect(() => {
     cargarAsesores();
@@ -206,7 +210,6 @@ export default function Guias() {
   async function cargarGuias() {
     setLoading(true);
     const desde = (pagina - 1) * POR_PAGINA;
-    const hasta = desde + POR_PAGINA - 1;
     let q = supabase
       .from("guias")
       .select(
@@ -214,7 +217,7 @@ export default function Guias() {
         { count: "exact" },
       )
       .order("created_at", { ascending: false })
-      .range(desde, hasta);
+      .range(desde, desde + POR_PAGINA - 1);
     if (busqueda)
       q = q.or(
         `numero_guia.ilike.%${busqueda}%,factura_indurruedas.ilike.%${busqueda}%,destinatario.ilike.%${busqueda}%,ciudad_destino.ilike.%${busqueda}%`,
@@ -244,7 +247,6 @@ export default function Guias() {
         (g) => g.clientes?.usuarios?.id === filtroAsesor,
       );
     }
-    // Ordenar: en_transito primero, luego resto por fecha descendente
     const ORDEN = {
       en_transito: 0,
       pendiente: 1,
@@ -255,8 +257,8 @@ export default function Guias() {
       anulada: 6,
     };
     resultado.sort((a, b) => {
-      const oa = ORDEN[a.estado] ?? 7;
-      const ob = ORDEN[b.estado] ?? 7;
+      const oa = ORDEN[a.estado] ?? 7,
+        ob = ORDEN[b.estado] ?? 7;
       if (oa !== ob) return oa - ob;
       return new Date(b.fecha_guia || 0) - new Date(a.fecha_guia || 0);
     });
@@ -265,17 +267,14 @@ export default function Guias() {
     setLoading(false);
   }
 
-  // Cache de clientes para evitar consultas repetidas
-  const clienteCache = useRef({});
-
   async function buscarClienteConCache(nit, nombre) {
     const key =
       nit && nit !== "nan" && String(nit).length > 3
         ? `nit:${nit}`
         : `nombre:${nombre}`;
-    if (clienteCache.current[key]) return clienteCache.current[key];
+    if (clienteCache.current[key] !== undefined)
+      return clienteCache.current[key];
 
-    // 1. Buscar por NIT exacto primero
     if (nit && nit !== "nan" && String(nit).trim().length > 3) {
       const { data } = await supabase
         .from("clientes")
@@ -288,10 +287,8 @@ export default function Guias() {
       }
     }
 
-    // 2. Si no hay NIT, buscar por nombre completo exacto
     if (nombre && nombre.trim().length > 2) {
       const nombreLimpio = nombre.trim();
-      // Intentar coincidencia exacta primero
       const { data: exacto } = await supabase
         .from("clientes")
         .select("id")
@@ -301,8 +298,6 @@ export default function Guias() {
         clienteCache.current[key] = exacto[0].id;
         return exacto[0].id;
       }
-
-      // Si no hay exacto, buscar conteniendo el nombre completo
       const { data: parcial } = await supabase
         .from("clientes")
         .select("id")
@@ -316,6 +311,20 @@ export default function Guias() {
 
     clienteCache.current[key] = null;
     return null;
+  }
+
+  async function asignarSimonSiFBC(factura, clienteId) {
+    if (!factura || !clienteId) return;
+    // Si la factura es FBC (no FBG), asignar a Simon
+    if (
+      factura.toUpperCase().includes("FBC") &&
+      !factura.toUpperCase().includes("FBG")
+    ) {
+      await supabase
+        .from("clientes")
+        .update({ asesor_id: SIMON_ID })
+        .eq("id", clienteId);
+    }
   }
 
   async function procesarExcelEstelar(e) {
@@ -343,7 +352,6 @@ export default function Guias() {
         trans: "Estelar Express",
       });
 
-      // 1. Obtener todas las guias existentes
       const numerosGuia = rows
         .map((r) => String(r["GUIA"]).trim())
         .filter(Boolean);
@@ -377,14 +385,15 @@ export default function Guias() {
           ? parsearFechaEstelar(row["FECHA ENTREGA"])
           : null;
         const diasExcel = parseInt(row["DIAS ENTREGA"]) || null;
-        // Solo guardar dias_habiles si está entregado (dato fijo del Excel)
-        // En tránsito = NULL para que el frontend calcule dinámicamente
         const diasHabiles = estado === "entregado" ? diasExcel : null;
         const destinatario = String(row["DESTINATARIO"] || "").trim();
         const nit = String(row["DOCUMENTO DESTINATARIO"] || "").trim();
         const ciudad = String(row["CIUDAD DESTINO"] || "").trim();
         const direccion = String(row["DIRECCION DESTINO"] || "").trim();
         const clienteId = await buscarClienteConCache(nit, destinatario);
+
+        // Asignar Simon si es FBC
+        if (clienteId) await asignarSimonSiFBC(factura, clienteId);
 
         if (existentesMap[numeroGuia]) {
           porActualizar.push({
@@ -413,7 +422,6 @@ export default function Guias() {
         }
       }
 
-      // 2. Insertar en lotes de 50
       setProgreso((p) => ({
         ...p,
         texto: "Insertando guias nuevas...",
@@ -432,7 +440,6 @@ export default function Guias() {
         }));
       }
 
-      // 3. Actualizar en lotes de 50
       setProgreso((p) => ({
         ...p,
         texto: "Actualizando estados...",
@@ -539,8 +546,6 @@ export default function Guias() {
           .split("-")[0]
           .trim();
         const diasExcel = parseInt(row["Dias de entrega (habiles)"]) || null;
-        // Solo guardar dias_habiles si está entregado (dato fijo)
-        // En tránsito = NULL para que el frontend calcule dinámicamente
         const diasHabiles = estado === "entregado" ? diasExcel : null;
         const clienteId = await buscarClienteConCache(null, destinatario);
 
@@ -589,24 +594,10 @@ export default function Guias() {
         if (!insertErr) {
           nuevas += lote.length;
         } else {
-          console.error("Error lote TCC:", insertErr.message);
-          // Intentar uno por uno
           for (const g of lote) {
             const { error: e2 } = await supabase.from("guias").insert([g]);
             if (!e2) nuevas++;
-            else {
-              errores++;
-              console.error(
-                "Error guia:",
-                g.numero_guia,
-                "|",
-                e2.message,
-                "| estado:",
-                g.estado,
-                "| estado_trans:",
-                g.estado_transportadora,
-              );
-            }
+            else errores++;
           }
         }
         setProgreso((p) => ({
@@ -629,15 +620,7 @@ export default function Guias() {
           .update({ ...datos, updated_at: new Date().toISOString() })
           .eq("id", id);
         if (!updateErr) actualizadas++;
-        else {
-          errores++;
-          console.error(
-            "Error actualizando:",
-            id,
-            updateErr.message,
-            JSON.stringify(datos),
-          );
-        }
+        else errores++;
         setProgreso((p) => ({ ...p, actual: i + 1 }));
       }
 
@@ -708,12 +691,8 @@ export default function Guias() {
     setExportando(false);
   }
 
-  const [modalFechaEntrega, setModalFechaEntrega] = useState(null); // { guiaId, fechaActual }
-  const [fechaEntregaModal, setFechaEntregaModal] = useState("");
-
   async function actualizarEstado(guiaId, nuevoEstado, guia) {
     if (nuevoEstado === "entregado") {
-      // Abrir modal para escoger fecha
       setFechaEntregaModal(new Date().toISOString().split("T")[0]);
       setModalFechaEntrega({ guiaId, guia });
       return;
@@ -730,11 +709,9 @@ export default function Guias() {
   async function confirmarEntrega() {
     const { guiaId, guia } = modalFechaEntrega;
     const fechaGuia = guia.fecha_guia ? new Date(guia.fecha_guia) : null;
-    const fechaFin = new Date(fechaEntregaModal);
     const dias = fechaGuia
-      ? Math.floor((fechaFin - fechaGuia) / 86400000)
+      ? Math.floor((new Date(fechaEntregaModal) - fechaGuia) / 86400000)
       : null;
-
     await supabase
       .from("guias")
       .update({
@@ -745,14 +722,14 @@ export default function Guias() {
         updated_at: new Date().toISOString(),
       })
       .eq("id", guiaId);
-
-    await supabase.from("historial_estados").insert({
-      guia_id: guiaId,
-      estado_anterior: guia.estado,
-      estado_nuevo: "entregado",
-      fuente: "admin",
-    });
-
+    await supabase
+      .from("historial_estados")
+      .insert({
+        guia_id: guiaId,
+        estado_anterior: guia.estado,
+        estado_nuevo: "entregado",
+        fuente: "admin",
+      });
     setGuias((prev) =>
       prev.map((g) =>
         g.id === guiaId
@@ -972,8 +949,6 @@ export default function Guias() {
               </thead>
               <tbody>
                 {guias.map((g) => {
-                  // Usar dias_habiles guardado en DB si existe
-                  // Si no, calcular: entregado = fecha_guia hasta fecha_entrega, activo = hasta hoy
                   let dias = 0;
                   if (g.dias_habiles != null) {
                     dias = g.dias_habiles;
@@ -1122,18 +1097,17 @@ export default function Guias() {
                           }}
                         >
                           <PillEstado estado={g.estado} />
-                          {g.transportadora === "tcc" &&
-                            g.estado_transportadora && (
-                              <span
-                                style={{
-                                  fontSize: "9px",
-                                  color: "var(--gray)",
-                                  fontStyle: "italic",
-                                }}
-                              >
-                                {g.estado_transportadora}
-                              </span>
-                            )}
+                          {g.estado_transportadora && (
+                            <span
+                              style={{
+                                fontSize: "9px",
+                                color: "var(--gray)",
+                                fontStyle: "italic",
+                              }}
+                            >
+                              {g.estado_transportadora}
+                            </span>
+                          )}
                         </div>
                       </Td>
                       <Td>
@@ -1250,7 +1224,6 @@ export default function Guias() {
               </Btn>
             </div>
           </div>
-          {/* Espacio para que el contenido no quede tapado por la paginación fija */}
           <div style={{ height: "52px" }} />
         </>
       )}
@@ -1266,7 +1239,6 @@ export default function Guias() {
         />
       )}
 
-      {/* Modal fecha de entrega */}
       {modalFechaEntrega && (
         <div
           style={{
