@@ -23,6 +23,12 @@ import { es } from "date-fns/locale";
 const POR_PAGINA = 50;
 const SIMON_ID = "d9a0256c-d556-4506-8724-306c33016a22";
 
+function esFBC(factura) {
+  if (!factura) return false;
+  const f = factura.toUpperCase();
+  return f.includes("FBC") && !f.includes("FBG");
+}
+
 function extraerFacturaEstelar(anexos) {
   if (!anexos) return null;
   const match = String(anexos).match(/FB[GC]-?\s*\d+/gi);
@@ -42,7 +48,9 @@ function parsearFechaEstelar(str) {
 
 function parsearFechaTCC(str) {
   if (!str) return null;
-  const [d, m, y] = String(str).split("/");
+  const parts = String(str).split("/");
+  if (parts.length !== 3) return null;
+  const [d, m, y] = parts;
   if (!d || !m || !y) return null;
   return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
 }
@@ -267,19 +275,22 @@ export default function Guias() {
     setLoading(false);
   }
 
+  // Busca cliente por NIT primero, luego nombre completo exacto, luego parcial
   async function buscarClienteConCache(nit, nombre) {
-    const key =
-      nit && nit !== "nan" && String(nit).length > 3
-        ? `nit:${nit}`
-        : `nombre:${nombre}`;
-    if (clienteCache.current[key] !== undefined)
-      return clienteCache.current[key];
+    const nitLimpio =
+      nit && nit !== "nan" && String(nit).trim().length > 3
+        ? String(nit).trim()
+        : null;
+    const key = nitLimpio
+      ? `nit:${nitLimpio}`
+      : `nombre:${String(nombre || "").trim()}`;
+    if (key in clienteCache.current) return clienteCache.current[key];
 
-    if (nit && nit !== "nan" && String(nit).trim().length > 3) {
+    if (nitLimpio) {
       const { data } = await supabase
         .from("clientes")
         .select("id")
-        .eq("nit", String(nit).trim())
+        .eq("nit", nitLimpio)
         .limit(1);
       if (data?.[0]) {
         clienteCache.current[key] = data[0].id;
@@ -313,18 +324,56 @@ export default function Guias() {
     return null;
   }
 
-  async function asignarSimonSiFBC(factura, clienteId) {
-    if (!factura || !clienteId) return;
-    // Si la factura es FBC (no FBG), asignar a Simon
-    if (
-      factura.toUpperCase().includes("FBC") &&
-      !factura.toUpperCase().includes("FBG")
-    ) {
+  // Si es FBC: asigna Simon al cliente existente, o crea uno nuevo y lo asigna
+  async function gestionarClienteFBC(
+    factura,
+    clienteId,
+    destinatario,
+    nit,
+    ciudad,
+  ) {
+    if (!esFBC(factura)) return clienteId;
+
+    if (clienteId) {
+      // Cliente existe — asignar Simon
       await supabase
         .from("clientes")
         .update({ asesor_id: SIMON_ID })
         .eq("id", clienteId);
+      return clienteId;
     }
+
+    // Cliente no existe — crear y asignar Simon
+    const nombre = destinatario || "CLIENTE FBC";
+    const nitCliente =
+      nit && nit !== "nan" && String(nit).trim().length > 3
+        ? String(nit).trim()
+        : `FBC-${Date.now()}`;
+
+    const { data: nuevoCliente } = await supabase
+      .from("clientes")
+      .insert({
+        nit: nitCliente,
+        nombre: nombre,
+        asesor_id: SIMON_ID,
+      })
+      .select("id")
+      .single();
+
+    if (nuevoCliente) {
+      // Guardar en caché para no crear duplicados en la misma carga
+      if (nit) clienteCache.current[`nit:${nit}`] = nuevoCliente.id;
+      clienteCache.current[`nombre:${nombre}`] = nuevoCliente.id;
+
+      // Crear sede si hay ciudad
+      if (ciudad) {
+        await supabase
+          .from("sedes")
+          .insert({ cliente_id: nuevoCliente.id, ciudad, principal: true });
+      }
+      return nuevoCliente.id;
+    }
+    return null;
   }
 
   async function procesarExcelEstelar(e) {
@@ -364,8 +413,6 @@ export default function Guias() {
         existentesMap[g.numero_guia] = g;
       });
 
-      setProgreso((p) => ({ ...p, texto: "Detectando guias nuevas..." }));
-
       const porInsertar = [];
       const porActualizar = [];
 
@@ -384,16 +431,22 @@ export default function Guias() {
         const fechaEntrega = row["FECHA ENTREGA"]
           ? parsearFechaEstelar(row["FECHA ENTREGA"])
           : null;
-        const diasExcel = parseInt(row["DIAS ENTREGA"]) || null;
-        const diasHabiles = estado === "entregado" ? diasExcel : null;
+        const diasHabiles =
+          estado === "entregado" ? parseInt(row["DIAS ENTREGA"]) || null : null;
         const destinatario = String(row["DESTINATARIO"] || "").trim();
         const nit = String(row["DOCUMENTO DESTINATARIO"] || "").trim();
         const ciudad = String(row["CIUDAD DESTINO"] || "").trim();
         const direccion = String(row["DIRECCION DESTINO"] || "").trim();
-        const clienteId = await buscarClienteConCache(nit, destinatario);
 
-        // Asignar Simon si es FBC
-        if (clienteId) await asignarSimonSiFBC(factura, clienteId);
+        let clienteId = await buscarClienteConCache(nit, destinatario);
+        // Gestionar FBC: asignar/crear cliente para Simon
+        clienteId = await gestionarClienteFBC(
+          factura,
+          clienteId,
+          destinatario,
+          nit,
+          ciudad,
+        );
 
         if (existentesMap[numeroGuia]) {
           porActualizar.push({
@@ -545,9 +598,20 @@ export default function Guias() {
         const destino = String(row["Destino"] || "")
           .split("-")[0]
           .trim();
-        const diasExcel = parseInt(row["Dias de entrega (habiles)"]) || null;
-        const diasHabiles = estado === "entregado" ? diasExcel : null;
-        const clienteId = await buscarClienteConCache(null, destinatario);
+        const diasHabiles =
+          estado === "entregado"
+            ? parseInt(row["Dias de entrega (habiles)"]) || null
+            : null;
+
+        let clienteId = await buscarClienteConCache(null, destinatario);
+        // Gestionar FBC: asignar/crear cliente para Simon
+        clienteId = await gestionarClienteFBC(
+          factura,
+          clienteId,
+          destinatario,
+          null,
+          destino,
+        );
 
         if (existentesMap[numeroGuia]) {
           porActualizar.push({
