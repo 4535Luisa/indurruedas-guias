@@ -1,12 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import {
   KPICard,
   PageHeader,
   PillEstado,
   PillTransportadora,
+  Btn,
 } from "../components/UI";
-import { format, parseISO } from "date-fns";
+import {
+  format,
+  parseISO,
+  startOfWeek,
+  startOfMonth,
+  subMonths,
+  isWithinInterval,
+} from "date-fns";
 import { es } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
 
@@ -20,17 +28,111 @@ const COLORES = [
   "#FF88CC",
 ];
 
+// ─── Filtros de fecha ────────────────────────────────────────────────────────
+const PERIODOS = [
+  { id: "todo", label: "Todo" },
+  { id: "hoy", label: "Hoy" },
+  { id: "semana", label: "Esta semana" },
+  { id: "mes", label: "Este mes" },
+  { id: "ant", label: "Mes anterior" },
+  { id: "custom", label: "Rango" },
+];
+
+function getRango(periodo, customDesde, customHasta) {
+  const hoy = new Date();
+  hoy.setHours(23, 59, 59, 999);
+  const hoyStr = hoy.toISOString().split("T")[0];
+  if (periodo === "hoy") {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return { desde: d.toISOString().split("T")[0], hasta: hoyStr };
+  }
+  if (periodo === "semana") {
+    const d = startOfWeek(new Date(), { weekStartsOn: 1 });
+    return { desde: d.toISOString().split("T")[0], hasta: hoyStr };
+  }
+  if (periodo === "mes") {
+    const d = startOfMonth(new Date());
+    return { desde: d.toISOString().split("T")[0], hasta: hoyStr };
+  }
+  if (periodo === "ant") {
+    const d = startOfMonth(subMonths(new Date(), 1));
+    const h = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    return {
+      desde: d.toISOString().split("T")[0],
+      hasta: h.toISOString().split("T")[0],
+    };
+  }
+  if (periodo === "custom") {
+    return { desde: customDesde, hasta: customHasta };
+  }
+  return null; // "todo"
+}
+
+// ─── Barra horizontal mini ───────────────────────────────────────────────────
+function Barra({ pct, color = "var(--m)", height = 5 }) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        height,
+        background: "var(--blk3)",
+        borderRadius: 3,
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          height: "100%",
+          width: `${pct}%`,
+          background: color,
+          borderRadius: 3,
+          transition: "width .4s",
+        }}
+      />
+    </div>
+  );
+}
+
+// ─── Chip selector de período ────────────────────────────────────────────────
+function PeriodoChips({ value, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+      {PERIODOS.map((p) => (
+        <button
+          key={p.id}
+          onClick={() => onChange(p.id)}
+          style={{
+            padding: "4px 11px",
+            borderRadius: 20,
+            fontSize: 11,
+            cursor: "pointer",
+            border:
+              value === p.id ? "1px solid var(--m)" : "1px solid var(--blk5)",
+            background: value === p.id ? "rgba(170,255,0,.12)" : "transparent",
+            color: value === p.id ? "var(--m)" : "var(--gray)",
+            fontWeight: value === p.id ? 600 : 400,
+            transition: "all .15s",
+          }}
+        >
+          {p.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [stats, setStats] = useState({
-    guias_activas: 0,
-    entregadas: 0,
-    con_novedad: 0,
-    estelar_activas: 0,
-    tcc_activas: 0,
-  });
+
+  // Filtro período
+  const [periodo, setPeriodo] = useState("todo");
+  const [customDesde, setCustomDesde] = useState("");
+  const [customHasta, setCustomHasta] = useState("");
+
+  // Data cruda
+  const [todasGuias, setTodasGuias] = useState([]);
   const [porAsesor, setPorAsesor] = useState([]);
-  const [porEstado, setPorEstado] = useState([]);
   const [ultimasGuias, setUltimasGuias] = useState([]);
   const [syncs, setSyncs] = useState({
     bot: null,
@@ -38,9 +140,12 @@ export default function Dashboard() {
     excel_tcc: null,
   });
   const [guiasCriticas, setGuiasCriticas] = useState([]);
-  const [tiemposTrans, setTiemposTrans] = useState([]);
-  const [enviosMes, setEnviosMes] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Tabla recientes
+  const [buscar, setBuscar] = useState("");
+  const [pagina, setPagina] = useState(0);
+  const POR_PAG = 10;
 
   useEffect(() => {
     cargarDatos();
@@ -51,69 +156,52 @@ export default function Dashboard() {
     const hace6Dias = new Date(Date.now() - 6 * 86400000)
       .toISOString()
       .split("T")[0];
+    const hace6Meses = new Date(Date.now() - 180 * 86400000)
+      .toISOString()
+      .split("T")[0];
 
-    const [
-      statsRes,
-      asesorRes,
-      estadoRes,
-      recientesRes,
-      syncRes,
-      criticasRes,
-      entregadasRes,
-      todasRes,
-    ] = await Promise.all([
-      supabase.from("dashboard_stats").select("*").single(),
-      supabase.rpc("guias_por_asesor"),
-      supabase.rpc("guias_por_estado"),
-      supabase
-        .from("guias")
-        .select(
-          "numero_guia, transportadora, transportadora_nombre, estado, fecha_guia, ciudad_destino, clientes(nombre, usuarios(nombre))",
-        )
-        .order("created_at", { ascending: false })
-        .limit(8),
-      supabase
-        .from("sync_log")
-        .select(
-          "created_at, guias_nuevas, guias_actualizadas, transportadora, detalle",
-        )
-        .order("created_at", { ascending: false })
-        .limit(20),
-      supabase
-        .from("guias")
-        .select(
-          "id, numero_guia, transportadora, transportadora_nombre, factura_indurruedas, estado, fecha_guia, ciudad_destino, clientes(nombre, usuarios(nombre))",
-        )
-        .eq("activa", true)
-        .neq("estado", "entregado")
-        .neq("estado", "anulada")
-        .lt("fecha_guia", hace6Dias)
-        .order("fecha_guia", { ascending: true })
-        .limit(50),
-      supabase
-        .from("guias")
-        .select(
-          "transportadora, transportadora_nombre, dias_habiles, ciudad_destino",
-        )
-        .eq("estado", "entregado")
-        .not("dias_habiles", "is", null)
-        .limit(2000),
-      supabase
-        .from("guias")
-        .select("transportadora, transportadora_nombre, fecha_guia")
-        .not("fecha_guia", "is", null)
-        .gte(
-          "fecha_guia",
-          new Date(Date.now() - 180 * 86400000).toISOString().split("T")[0],
-        )
-        .limit(5000),
-    ]);
+    const [asesorRes, syncRes, criticasRes, todasRes, recientesRes] =
+      await Promise.all([
+        supabase.rpc("guias_por_asesor"),
+        supabase
+          .from("sync_log")
+          .select(
+            "created_at, guias_nuevas, guias_actualizadas, transportadora, detalle",
+          )
+          .order("created_at", { ascending: false })
+          .limit(20),
+        supabase
+          .from("guias")
+          .select(
+            "id, numero_guia, transportadora, transportadora_nombre, factura_indurruedas, estado, fecha_guia, ciudad_destino, clientes(nombre, usuarios(nombre))",
+          )
+          .eq("activa", true)
+          .neq("estado", "entregado")
+          .neq("estado", "anulada")
+          .lt("fecha_guia", hace6Dias)
+          .order("fecha_guia", { ascending: true })
+          .limit(50),
+        supabase
+          .from("guias")
+          .select(
+            "numero_guia, transportadora, transportadora_nombre, estado, fecha_guia, ciudad_destino, activa, dias_habiles, clientes(nombre, usuarios(nombre))",
+          )
+          .gte("fecha_guia", hace6Meses)
+          .not("fecha_guia", "is", null)
+          .limit(5000),
+        supabase
+          .from("guias")
+          .select(
+            "numero_guia, transportadora, transportadora_nombre, estado, fecha_guia, ciudad_destino, clientes(nombre, usuarios(nombre))",
+          )
+          .order("created_at", { ascending: false })
+          .limit(200),
+      ]);
 
-    if (statsRes.data) setStats(statsRes.data);
     setPorAsesor(asesorRes.data || []);
-    setPorEstado(estadoRes.data || []);
-    setUltimasGuias(recientesRes.data || []);
     setGuiasCriticas(criticasRes.data || []);
+    setTodasGuias(todasRes.data || []);
+    setUltimasGuias(recientesRes.data || []);
 
     const logs = syncRes.data || [];
     setSyncs({
@@ -124,53 +212,124 @@ export default function Dashboard() {
       ),
       excel_tcc: logs.find((l) => l.transportadora === "tcc"),
     });
+    setLoading(false);
+  }
 
-    // Tiempos promedio por transportadora + ciudad
-    const guiasEntregadas = entregadasRes.data || [];
-    const porTrans = {};
-    for (const g of guiasEntregadas) {
-      const key =
-        g.transportadora_nombre ||
-        (g.transportadora === "estelar"
-          ? "Estelar Express"
-          : g.transportadora === "tcc"
-            ? "TCC"
-            : g.transportadora);
-      if (!porTrans[key])
-        porTrans[key] = { total: 0, sumDias: 0, ciudades: {} };
-      porTrans[key].total++;
-      porTrans[key].sumDias += g.dias_habiles || 0;
-      const ciudad = g.ciudad_destino || "Sin ciudad";
-      if (!porTrans[key].ciudades[ciudad])
-        porTrans[key].ciudades[ciudad] = { total: 0, sumDias: 0 };
-      porTrans[key].ciudades[ciudad].total++;
-      porTrans[key].ciudades[ciudad].sumDias += g.dias_habiles || 0;
-    }
-    setTiemposTrans(
-      Object.entries(porTrans)
-        .map(([nombre, d]) => ({
-          nombre,
-          total: d.total,
-          promedio: Math.round(d.sumDias / d.total),
-          ciudades: Object.entries(d.ciudades)
-            .map(([ciudad, c]) => ({
-              ciudad,
-              total: c.total,
-              promedio: Math.round(c.sumDias / c.total),
-            }))
-            .filter((c) => c.total >= 2)
-            .sort((a, b) => b.total - a.total)
-            .slice(0, 6),
-        }))
-        .sort((a, b) => a.promedio - b.promedio),
+  // ── Datos filtrados por período ───────────────────────────────────────────
+  const rango = getRango(periodo, customDesde, customHasta);
+
+  const guiasFiltradas = useMemo(() => {
+    if (!rango) return todasGuias;
+    return todasGuias.filter((g) => {
+      if (!g.fecha_guia) return false;
+      return g.fecha_guia >= rango.desde && g.fecha_guia <= rango.hasta;
+    });
+  }, [todasGuias, rango]);
+
+  // ── KPIs derivados ────────────────────────────────────────────────────────
+  const kpis = useMemo(() => {
+    const activas = guiasFiltradas.filter(
+      (g) => g.activa && g.estado !== "entregado" && g.estado !== "anulada",
+    ).length;
+    const entregadas = guiasFiltradas.filter(
+      (g) => g.estado === "entregado",
+    ).length;
+    const novedades = guiasFiltradas.filter(
+      (g) => g.estado === "novedad",
+    ).length;
+    const total = guiasFiltradas.length;
+    const tasaEnt = total > 0 ? Math.round((entregadas / total) * 100) : 0;
+    const conDias = guiasFiltradas.filter(
+      (g) => g.estado === "entregado" && g.dias_habiles != null,
     );
+    const promDias =
+      conDias.length > 0
+        ? (
+            conDias.reduce((s, g) => s + (g.dias_habiles || 0), 0) /
+            conDias.length
+          ).toFixed(1)
+        : "—";
+    const criticas =
+      periodo === "todo"
+        ? guiasCriticas.length
+        : guiasFiltradas.filter((g) => {
+            if (
+              !g.fecha_guia ||
+              g.estado === "entregado" ||
+              g.estado === "anulada"
+            )
+              return false;
+            return (
+              Math.floor((new Date() - new Date(g.fecha_guia)) / 86400000) > 6
+            );
+          }).length;
+    const estelar = guiasFiltradas.filter(
+      (g) =>
+        g.transportadora === "estelar" &&
+        g.activa &&
+        g.estado !== "entregado" &&
+        g.estado !== "anulada",
+    ).length;
+    const tcc = guiasFiltradas.filter(
+      (g) =>
+        g.transportadora === "tcc" &&
+        g.activa &&
+        g.estado !== "entregado" &&
+        g.estado !== "anulada",
+    ).length;
+    return {
+      activas,
+      entregadas,
+      novedades,
+      total,
+      tasaEnt,
+      promDias,
+      criticas,
+      estelar,
+      tcc,
+    };
+  }, [guiasFiltradas, guiasCriticas, periodo]);
 
-    // Envíos por mes por transportadora (últimos 6 meses)
-    const todasGuias = todasRes.data || [];
+  // ── Gráficas ──────────────────────────────────────────────────────────────
+  const porEstado = useMemo(() => {
+    const m = {};
+    guiasFiltradas.forEach((g) => {
+      if (!m[g.estado]) m[g.estado] = 0;
+      m[g.estado]++;
+    });
+    return Object.entries(m).sort((a, b) => b[1] - a[1]);
+  }, [guiasFiltradas]);
+
+  const tiemposTrans = useMemo(() => {
+    const porTrans = {};
+    guiasFiltradas
+      .filter((g) => g.estado === "entregado" && g.dias_habiles != null)
+      .forEach((g) => {
+        const key =
+          g.transportadora_nombre ||
+          (g.transportadora === "estelar"
+            ? "Estelar Express"
+            : g.transportadora === "tcc"
+              ? "TCC"
+              : g.transportadora);
+        if (!porTrans[key]) porTrans[key] = { total: 0, sumDias: 0 };
+        porTrans[key].total++;
+        porTrans[key].sumDias += g.dias_habiles || 0;
+      });
+    return Object.entries(porTrans)
+      .map(([nombre, d]) => ({
+        nombre,
+        total: d.total,
+        promedio: +(d.sumDias / d.total).toFixed(1),
+      }))
+      .sort((a, b) => a.promedio - b.promedio);
+  }, [guiasFiltradas]);
+
+  const enviosMes = useMemo(() => {
     const meses = {};
-    for (const g of todasGuias) {
-      if (!g.fecha_guia) continue;
-      const mes = g.fecha_guia.substring(0, 7); // YYYY-MM
+    guiasFiltradas.forEach((g) => {
+      if (!g.fecha_guia) return;
+      const mes = g.fecha_guia.substring(0, 7);
       const trans =
         g.transportadora_nombre ||
         (g.transportadora === "estelar"
@@ -179,13 +338,12 @@ export default function Dashboard() {
             ? "TCC"
             : "Otra");
       if (!meses[mes]) meses[mes] = {};
-      if (!meses[mes][trans]) meses[mes][trans] = 0;
-      meses[mes][trans]++;
-    }
+      meses[mes][trans] = (meses[mes][trans] || 0) + 1;
+    });
     const mesesOrdenados = Object.keys(meses).sort();
     const transportadoras = [
       ...new Set(
-        todasGuias.map(
+        guiasFiltradas.map(
           (g) =>
             g.transportadora_nombre ||
             (g.transportadora === "estelar"
@@ -196,12 +354,32 @@ export default function Dashboard() {
         ),
       ),
     ];
-    setEnviosMes({ meses: mesesOrdenados, transportadoras, datos: meses });
+    return { meses: mesesOrdenados, transportadoras, datos: meses };
+  }, [guiasFiltradas]);
 
-    setLoading(false);
-  }
+  // ── Tabla mejorada (recientes) ────────────────────────────────────────────
+  const tablaFiltrada = useMemo(() => {
+    const q = buscar.toLowerCase();
+    return ultimasGuias.filter(
+      (g) =>
+        !q ||
+        g.numero_guia?.toLowerCase().includes(q) ||
+        g.clientes?.nombre?.toLowerCase().includes(q) ||
+        g.ciudad_destino?.toLowerCase().includes(q) ||
+        g.clientes?.usuarios?.nombre?.toLowerCase().includes(q) ||
+        g.estado?.toLowerCase().includes(q),
+    );
+  }, [ultimasGuias, buscar]);
+
+  const totalPags = Math.ceil(tablaFiltrada.length / POR_PAG);
+  const tablaVisible = tablaFiltrada.slice(
+    pagina * POR_PAG,
+    (pagina + 1) * POR_PAG,
+  );
 
   const maxAsesor = porAsesor[0]?.total || 1;
+  const maxTiempo = Math.max(...tiemposTrans.map((t) => t.promedio), 1);
+  const maxEstado = porEstado[0]?.[1] || 1;
 
   if (loading)
     return (
@@ -209,31 +387,77 @@ export default function Dashboard() {
         style={{
           color: "var(--m)",
           fontFamily: "var(--font-mono)",
-          fontSize: "12px",
+          fontSize: 12,
         }}
       >
         Cargando dashboard...
       </div>
     );
 
-  const maxTiempo = Math.max(...tiemposTrans.map((t) => t.promedio), 1);
-
   return (
     <div>
-      <PageHeader
-        title="Dashboard"
-        subtitle="Resumen de guías y envíos activos"
-      />
+      {/* ── Header con filtros ── */}
+      <PageHeader title="Dashboard" subtitle="Resumen de guías y envíos">
+        <PeriodoChips
+          value={periodo}
+          onChange={(p) => {
+            setPeriodo(p);
+            setPagina(0);
+          }}
+        />
+      </PageHeader>
 
-      {/* Banner críticas */}
+      {/* Rango personalizado */}
+      {periodo === "custom" && (
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            marginBottom: 16,
+            flexWrap: "wrap",
+          }}
+        >
+          <span style={{ fontSize: 11, color: "var(--gray)" }}>Desde</span>
+          <input
+            type="date"
+            value={customDesde}
+            onChange={(e) => setCustomDesde(e.target.value)}
+            style={{
+              background: "var(--blk2)",
+              border: "1px solid var(--blk5)",
+              borderRadius: 6,
+              padding: "5px 10px",
+              color: "var(--wht)",
+              fontSize: 12,
+            }}
+          />
+          <span style={{ fontSize: 11, color: "var(--gray)" }}>Hasta</span>
+          <input
+            type="date"
+            value={customHasta}
+            onChange={(e) => setCustomHasta(e.target.value)}
+            style={{
+              background: "var(--blk2)",
+              border: "1px solid var(--blk5)",
+              borderRadius: 6,
+              padding: "5px 10px",
+              color: "var(--wht)",
+              fontSize: 12,
+            }}
+          />
+        </div>
+      )}
+
+      {/* ── Banner críticas ── */}
       {guiasCriticas.length > 0 && (
         <div
           style={{
             background: "#1a0800",
             border: "1px solid var(--danger)",
-            borderRadius: "10px",
+            borderRadius: 10,
             padding: "14px 16px",
-            marginBottom: "16px",
+            marginBottom: 16,
           }}
         >
           <div
@@ -241,15 +465,15 @@ export default function Dashboard() {
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              marginBottom: "10px",
+              marginBottom: 10,
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "16px" }}>🚨</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 16 }}>🚨</span>
               <span
                 style={{
-                  fontSize: "13px",
-                  fontWeight: "500",
+                  fontSize: 13,
+                  fontWeight: 500,
                   color: "var(--danger)",
                 }}
               >
@@ -260,14 +484,14 @@ export default function Dashboard() {
             <button
               onClick={() => navigate("/guias?estado=criticas")}
               style={{
-                fontSize: "11px",
+                fontSize: 11,
                 padding: "5px 12px",
                 background: "var(--danger)",
                 color: "#fff",
                 border: "none",
-                borderRadius: "5px",
+                borderRadius: 5,
                 cursor: "pointer",
-                fontWeight: "500",
+                fontWeight: 500,
               }}
             >
               Ver todas →
@@ -277,8 +501,8 @@ export default function Dashboard() {
             style={{
               display: "flex",
               flexDirection: "column",
-              gap: "5px",
-              maxHeight: "200px",
+              gap: 5,
+              maxHeight: 200,
               overflowY: "auto",
             }}
           >
@@ -293,10 +517,10 @@ export default function Dashboard() {
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: "10px",
+                    gap: 10,
                     padding: "7px 10px",
                     background: "rgba(255,68,68,0.07)",
-                    borderRadius: "6px",
+                    borderRadius: 6,
                     flexWrap: "wrap",
                     cursor: "pointer",
                   }}
@@ -310,85 +534,40 @@ export default function Dashboard() {
                   <span
                     style={{
                       fontFamily: "var(--font-mono)",
-                      fontSize: "11px",
+                      fontSize: 11,
                       color: "var(--danger)",
-                      fontWeight: "700",
-                      minWidth: "100px",
+                      fontWeight: 700,
+                      minWidth: 100,
                     }}
                   >
                     {g.numero_guia}
                   </span>
-                  {g.transportadora === "otra" ? (
-                    <span
-                      style={{
-                        fontSize: "10px",
-                        color: "#CC99FF",
-                        background: "rgba(170,136,255,0.2)",
-                        padding: "2px 8px",
-                        borderRadius: "10px",
-                        border: "1px solid rgba(170,136,255,0.4)",
-                        fontWeight: "500",
-                      }}
-                    >
-                      {g.transportadora_nombre
-                        ?.split(" ")
-                        .slice(0, 2)
-                        .join(" ")}
-                    </span>
-                  ) : g.transportadora === "estelar" ? (
-                    <span
-                      style={{
-                        fontSize: "10px",
-                        color: "#AAFF00",
-                        background: "rgba(170,255,0,0.15)",
-                        padding: "2px 8px",
-                        borderRadius: "10px",
-                        border: "1px solid rgba(170,255,0,0.4)",
-                        fontWeight: "500",
-                      }}
-                    >
-                      Estelar Express
-                    </span>
-                  ) : (
-                    <span
-                      style={{
-                        fontSize: "10px",
-                        color: "#88AAFF",
-                        background: "rgba(85,170,255,0.15)",
-                        padding: "2px 8px",
-                        borderRadius: "10px",
-                        border: "1px solid rgba(85,170,255,0.4)",
-                        fontWeight: "500",
-                      }}
-                    >
-                      TCC
-                    </span>
-                  )}
+                  <PillTransportadora transportadora={g.transportadora} />
                   <span
                     style={{
-                      fontSize: "11px",
+                      fontSize: 11,
                       color: "var(--wht2)",
                       flex: 1,
-                      minWidth: "120px",
+                      minWidth: 120,
                     }}
                   >
                     {g.clientes?.nombre || "—"}
                   </span>
-                  <span style={{ fontSize: "11px", color: "var(--gray)" }}>
+                  <span style={{ fontSize: 11, color: "var(--gray)" }}>
                     {g.ciudad_destino || "—"}
                   </span>
-                  <span style={{ fontSize: "11px", color: "var(--gray)" }}>
+                  <span style={{ fontSize: 11, color: "var(--gray)" }}>
                     {g.clientes?.usuarios?.nombre || "—"}
                   </span>
                   <span
                     style={{
                       fontFamily: "var(--font-mono)",
-                      fontSize: "12px",
-                      fontWeight: "700",
+                      fontSize: 12,
+                      fontWeight: 700,
                       color: "var(--danger)",
                       background: "rgba(255,68,68,0.2)",
                       padding: "2px 8px",
-                      borderRadius: "4px",
+                      borderRadius: 4,
                     }}
                   >
                     {dias}d
@@ -401,64 +580,230 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* KPIs */}
+      {/* ── KPIs fila 1 ── */}
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4, minmax(0,1fr))",
-          gap: "12px",
-          marginBottom: "20px",
+          gap: 12,
+          marginBottom: 12,
         }}
       >
         <KPICard
           label="Guías activas"
-          value={stats.guias_activas}
-          sub="En este momento"
+          value={kpis.activas}
+          sub={rango ? "En el período" : "En este momento"}
           accent="var(--m)"
         />
         <KPICard
           label="Entregadas"
-          value={stats.entregadas}
-          sub="Historial total"
+          value={kpis.entregadas}
+          sub={rango ? "En el período" : "Historial total"}
+          accent="#AAFF00"
         />
         <KPICard
           label="Con novedad"
-          value={stats.con_novedad}
+          value={kpis.novedades}
           sub="Requieren atención"
-          accent={stats.con_novedad > 0 ? "var(--warn)" : undefined}
+          accent={kpis.novedades > 0 ? "var(--warn)" : undefined}
         />
         <KPICard
           label="+6 días sin entrega"
-          value={guiasCriticas.length}
+          value={kpis.criticas}
           sub="Críticas"
-          accent={guiasCriticas.length > 0 ? "var(--danger)" : undefined}
+          accent={kpis.criticas > 0 ? "var(--danger)" : undefined}
         />
       </div>
 
-      {/* Asesor + Estado */}
+      {/* ── KPIs fila 2 ── */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: "16px",
-          marginBottom: "16px",
+          gridTemplateColumns: "repeat(4, minmax(0,1fr))",
+          gap: 12,
+          marginBottom: 20,
         }}
       >
+        {/* Tasa de entrega */}
         <div
           style={{
             background: "var(--blk2)",
             border: "1px solid var(--blk4)",
-            borderRadius: "10px",
-            padding: "16px",
+            borderRadius: 8,
+            padding: 14,
           }}
         >
           <div
             style={{
-              fontSize: "10px",
+              fontSize: 10,
               color: "var(--gray)",
               textTransform: "uppercase",
               letterSpacing: ".05em",
-              marginBottom: "14px",
+              marginBottom: 6,
+            }}
+          >
+            Tasa de entrega
+          </div>
+          <div
+            style={{
+              fontSize: 26,
+              fontWeight: 500,
+              fontFamily: "var(--font-mono)",
+              color:
+                kpis.tasaEnt >= 80
+                  ? "var(--m)"
+                  : kpis.tasaEnt >= 50
+                    ? "var(--warn)"
+                    : "var(--danger)",
+              lineHeight: 1,
+            }}
+          >
+            {kpis.tasaEnt}%
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <Barra
+              pct={kpis.tasaEnt}
+              color={
+                kpis.tasaEnt >= 80
+                  ? "var(--m)"
+                  : kpis.tasaEnt >= 50
+                    ? "var(--warn)"
+                    : "var(--danger)"
+              }
+              height={4}
+            />
+          </div>
+          <div style={{ fontSize: 10, color: "var(--gray)", marginTop: 4 }}>
+            de {kpis.total} guías
+          </div>
+        </div>
+
+        {/* Tiempo promedio */}
+        <div
+          style={{
+            background: "var(--blk2)",
+            border: "1px solid var(--blk4)",
+            borderRadius: 8,
+            padding: 14,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              color: "var(--gray)",
+              textTransform: "uppercase",
+              letterSpacing: ".05em",
+              marginBottom: 6,
+            }}
+          >
+            Tiempo prom. entrega
+          </div>
+          <div
+            style={{
+              fontSize: 26,
+              fontWeight: 500,
+              fontFamily: "var(--font-mono)",
+              color:
+                typeof kpis.promDias === "number"
+                  ? kpis.promDias <= 3
+                    ? "var(--m)"
+                    : kpis.promDias <= 6
+                      ? "var(--warn)"
+                      : "var(--danger)"
+                  : "var(--wht)",
+              lineHeight: 1,
+            }}
+          >
+            {kpis.promDias}
+            {typeof kpis.promDias === "string" ? "" : "d"}
+          </div>
+          <div style={{ fontSize: 10, color: "var(--gray)", marginTop: 5 }}>
+            días hábiles · guías entregadas
+          </div>
+        </div>
+
+        {/* Estelar */}
+        <div
+          style={{
+            background: "var(--blk2)",
+            border: "1px solid var(--blk4)",
+            borderRadius: 8,
+            padding: 14,
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: 10, color: "var(--gray)", marginBottom: 4 }}>
+            Estelar Express activas
+          </div>
+          <div
+            style={{
+              fontSize: 26,
+              fontWeight: 500,
+              color: "var(--m)",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            {kpis.estelar}
+          </div>
+          <div style={{ fontSize: 10, color: "var(--gray)", marginTop: 4 }}>
+            guías en curso
+          </div>
+        </div>
+
+        {/* TCC */}
+        <div
+          style={{
+            background: "var(--blk2)",
+            border: "1px solid var(--blk4)",
+            borderRadius: 8,
+            padding: 14,
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: 10, color: "var(--gray)", marginBottom: 4 }}>
+            TCC activas
+          </div>
+          <div
+            style={{
+              fontSize: 26,
+              fontWeight: 500,
+              color: "#AA88FF",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            {kpis.tcc}
+          </div>
+          <div style={{ fontSize: 10, color: "var(--gray)", marginTop: 4 }}>
+            guías en curso
+          </div>
+        </div>
+      </div>
+
+      {/* ── Asesor + Estado ── */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 16,
+          marginBottom: 16,
+        }}
+      >
+        {/* Por asesor */}
+        <div
+          style={{
+            background: "var(--blk2)",
+            border: "1px solid var(--blk4)",
+            borderRadius: 10,
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              color: "var(--gray)",
+              textTransform: "uppercase",
+              letterSpacing: ".05em",
+              marginBottom: 14,
             }}
           >
             Guías activas por asesor
@@ -469,15 +814,15 @@ export default function Dashboard() {
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: "10px",
-                marginBottom: "9px",
+                gap: 10,
+                marginBottom: 9,
               }}
             >
               <span
                 style={{
-                  fontSize: "11px",
+                  fontSize: 11,
                   color: "var(--wht2)",
-                  width: "140px",
+                  width: 140,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
@@ -486,29 +831,12 @@ export default function Dashboard() {
               >
                 {nombre}
               </span>
-              <div
-                style={{
-                  flex: 1,
-                  height: "5px",
-                  background: "var(--blk3)",
-                  borderRadius: "3px",
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    height: "100%",
-                    width: `${(total / maxAsesor) * 100}%`,
-                    background: "var(--m)",
-                    borderRadius: "3px",
-                  }}
-                />
-              </div>
+              <Barra pct={(total / maxAsesor) * 100} />
               <span
                 style={{
-                  fontSize: "11px",
+                  fontSize: 11,
                   color: "var(--gray)",
-                  width: "24px",
+                  width: 24,
                   textAlign: "right",
                   fontFamily: "var(--font-mono)",
                 }}
@@ -518,167 +846,97 @@ export default function Dashboard() {
             </div>
           ))}
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+
+        {/* Por estado */}
+        <div
+          style={{
+            background: "var(--blk2)",
+            border: "1px solid var(--blk4)",
+            borderRadius: 10,
+            padding: 16,
+          }}
+        >
           <div
             style={{
-              background: "var(--blk2)",
-              border: "1px solid var(--blk4)",
-              borderRadius: "10px",
-              padding: "16px",
-              flex: 1,
+              fontSize: 10,
+              color: "var(--gray)",
+              textTransform: "uppercase",
+              letterSpacing: ".05em",
+              marginBottom: 12,
             }}
           >
+            Estado de guías {rango ? "en el período" : "activas"}
+          </div>
+          {porEstado.map(([estado, total]) => (
             <div
+              key={estado}
               style={{
-                fontSize: "10px",
-                color: "var(--gray)",
-                textTransform: "uppercase",
-                letterSpacing: ".05em",
-                marginBottom: "12px",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                marginBottom: 8,
               }}
             >
-              Estado de guías activas
-            </div>
-            {porEstado.map(({ estado, total }) => (
-              <div
-                key={estado}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "5px 0",
-                  borderBottom: "1px solid var(--blk3)",
-                }}
-              >
+              <div style={{ width: 110, flexShrink: 0 }}>
                 <PillEstado estado={estado} />
-                <span
-                  style={{
-                    fontSize: "12px",
-                    color: "var(--gray)",
-                    fontFamily: "var(--font-mono)",
-                  }}
-                >
-                  {total}
-                </span>
               </div>
-            ))}
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "8px",
-            }}
-          >
-            <div
-              style={{
-                background: "var(--blk2)",
-                border: "1px solid var(--blk4)",
-                borderRadius: "8px",
-                padding: "12px",
-                textAlign: "center",
-              }}
-            >
-              <div
+              <Barra pct={(total / maxEstado) * 100} color="var(--blk5)" />
+              <span
                 style={{
-                  fontSize: "10px",
+                  fontSize: 11,
                   color: "var(--gray)",
-                  marginBottom: "4px",
-                }}
-              >
-                Estelar Express
-              </div>
-              <div
-                style={{
-                  fontSize: "22px",
-                  fontWeight: "500",
-                  color: "var(--m)",
                   fontFamily: "var(--font-mono)",
+                  width: 28,
+                  textAlign: "right",
                 }}
               >
-                {stats.estelar_activas}
-              </div>
+                {total}
+              </span>
             </div>
-            <div
-              style={{
-                background: "var(--blk2)",
-                border: "1px solid var(--blk4)",
-                borderRadius: "8px",
-                padding: "12px",
-                textAlign: "center",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "10px",
-                  color: "var(--gray)",
-                  marginBottom: "4px",
-                }}
-              >
-                TCC
-              </div>
-              <div
-                style={{
-                  fontSize: "22px",
-                  fontWeight: "500",
-                  color: "var(--purple)",
-                  fontFamily: "var(--font-mono)",
-                }}
-              >
-                {stats.tcc_activas}
-              </div>
-            </div>
-          </div>
+          ))}
         </div>
       </div>
 
-      {/* Gráfica: días promedio por transportadora */}
+      {/* ── Tiempo promedio por transportadora ── */}
       {tiemposTrans.length > 0 && (
         <div
           style={{
             background: "var(--blk2)",
             border: "1px solid var(--blk4)",
-            borderRadius: "10px",
-            padding: "20px",
-            marginBottom: "16px",
+            borderRadius: 10,
+            padding: 20,
+            marginBottom: 16,
           }}
         >
           <div
             style={{
-              fontSize: "13px",
-              fontWeight: "500",
+              fontSize: 13,
+              fontWeight: 500,
               color: "var(--wht)",
-              marginBottom: "4px",
+              marginBottom: 4,
             }}
           >
             Tiempo promedio de entrega por transportadora
           </div>
-          <div
-            style={{
-              fontSize: "10px",
-              color: "var(--gray)",
-              marginBottom: "20px",
-            }}
-          >
+          <div style={{ fontSize: 10, color: "var(--gray)", marginBottom: 20 }}>
             Días hábiles promedio · verde ≤3 · naranja ≤6 · rojo {">"} 6
           </div>
           <div
             style={{
               display: "flex",
-              gap: "24px",
+              gap: 24,
               alignItems: "flex-end",
-              height: "160px",
-              marginBottom: "20px",
+              height: 160,
+              marginBottom: 16,
             }}
           >
-            {tiemposTrans.map((t, i) => {
+            {tiemposTrans.map((t) => {
               const color =
                 t.promedio <= 3
                   ? "var(--m)"
                   : t.promedio <= 6
                     ? "var(--warn)"
                     : "var(--danger)";
-              const altura = `${Math.max(20, (t.promedio / maxTiempo) * 100)}%`;
               return (
                 <div
                   key={t.nombre}
@@ -693,11 +951,11 @@ export default function Dashboard() {
                 >
                   <div
                     style={{
-                      fontSize: "14px",
-                      fontWeight: "700",
+                      fontSize: 14,
+                      fontWeight: 700,
                       fontFamily: "var(--font-mono)",
                       color,
-                      marginBottom: "4px",
+                      marginBottom: 4,
                     }}
                   >
                     {t.promedio}d
@@ -705,12 +963,11 @@ export default function Dashboard() {
                   <div
                     style={{
                       width: "100%",
-                      height: altura,
+                      height: `${Math.max(20, (t.promedio / maxTiempo) * 100)}%`,
                       background: color,
                       borderRadius: "6px 6px 0 0",
                       opacity: 0.85,
-                      minHeight: "20px",
-                      position: "relative",
+                      minHeight: 20,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -718,9 +975,9 @@ export default function Dashboard() {
                   >
                     <span
                       style={{
-                        fontSize: "9px",
+                        fontSize: 9,
                         color: "rgba(0,0,0,0.7)",
-                        fontWeight: "700",
+                        fontWeight: 700,
                       }}
                     >
                       {t.total}
@@ -728,11 +985,11 @@ export default function Dashboard() {
                   </div>
                   <div
                     style={{
-                      fontSize: "9px",
+                      fontSize: 9,
                       color: "var(--gray)",
-                      marginTop: "6px",
+                      marginTop: 6,
                       textAlign: "center",
-                      maxWidth: "80px",
+                      maxWidth: 80,
                       lineHeight: 1.3,
                     }}
                   >
@@ -742,171 +999,65 @@ export default function Dashboard() {
               );
             })}
           </div>
-
-          {/* Detalle ciudades por transportadora */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px,1fr))",
-              gap: "12px",
-              borderTop: "1px solid var(--blk4)",
-              paddingTop: "16px",
-            }}
-          >
-            {tiemposTrans.map((t, ti) => (
-              <div key={t.nombre}>
-                <div
-                  style={{
-                    fontSize: "11px",
-                    fontWeight: "500",
-                    color: "var(--wht2)",
-                    marginBottom: "8px",
-                  }}
-                >
-                  {t.nombre}
-                </div>
-                {t.ciudades.map((c) => {
-                  const cColor =
-                    c.promedio <= 3
-                      ? "var(--m)"
-                      : c.promedio <= 6
-                        ? "var(--warn)"
-                        : "var(--danger)";
-                  const maxC = Math.max(
-                    ...t.ciudades.map((x) => x.promedio),
-                    1,
-                  );
-                  return (
-                    <div key={c.ciudad} style={{ marginBottom: "6px" }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          fontSize: "10px",
-                          marginBottom: "2px",
-                        }}
-                      >
-                        <span
-                          style={{
-                            color: "var(--gray)",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            maxWidth: "120px",
-                          }}
-                        >
-                          {c.ciudad}
-                        </span>
-                        <span
-                          style={{
-                            color: cColor,
-                            fontFamily: "var(--font-mono)",
-                            fontWeight: "500",
-                            flexShrink: 0,
-                          }}
-                        >
-                          {c.promedio}d · {c.total}
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          height: "4px",
-                          background: "var(--blk3)",
-                          borderRadius: "2px",
-                          overflow: "hidden",
-                        }}
-                      >
-                        <div
-                          style={{
-                            height: "100%",
-                            width: `${(c.promedio / maxC) * 100}%`,
-                            background: cColor,
-                            borderRadius: "2px",
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-                {t.ciudades.length === 0 && (
-                  <div style={{ fontSize: "10px", color: "var(--gray)" }}>
-                    Sin datos por ciudad aún
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
         </div>
       )}
 
-      {/* Gráfica: envíos por mes por transportadora */}
+      {/* ── Envíos por mes ── */}
       {enviosMes.meses?.length > 0 && (
         <div
           style={{
             background: "var(--blk2)",
             border: "1px solid var(--blk4)",
-            borderRadius: "10px",
-            padding: "20px",
-            marginBottom: "16px",
+            borderRadius: 10,
+            padding: 20,
+            marginBottom: 16,
           }}
         >
           <div
             style={{
-              fontSize: "13px",
-              fontWeight: "500",
+              fontSize: 13,
+              fontWeight: 500,
               color: "var(--wht)",
-              marginBottom: "4px",
+              marginBottom: 4,
             }}
           >
             Envíos por mes por transportadora
           </div>
-          <div
-            style={{
-              fontSize: "10px",
-              color: "var(--gray)",
-              marginBottom: "16px",
-            }}
-          >
-            Últimos 6 meses
+          <div style={{ fontSize: 10, color: "var(--gray)", marginBottom: 16 }}>
+            {rango ? `${rango.desde} → ${rango.hasta}` : "Últimos 6 meses"}
           </div>
-
-          {/* Leyenda */}
           <div
             style={{
               display: "flex",
-              gap: "16px",
+              gap: 16,
               flexWrap: "wrap",
-              marginBottom: "16px",
+              marginBottom: 16,
             }}
           >
             {enviosMes.transportadoras?.map((t, i) => (
               <div
                 key={t}
-                style={{ display: "flex", alignItems: "center", gap: "5px" }}
+                style={{ display: "flex", alignItems: "center", gap: 5 }}
               >
                 <div
                   style={{
-                    width: "10px",
-                    height: "10px",
-                    borderRadius: "2px",
+                    width: 10,
+                    height: 10,
+                    borderRadius: 2,
                     background: COLORES[i % COLORES.length],
                   }}
-                ></div>
-                <span style={{ fontSize: "10px", color: "var(--gray)" }}>
-                  {t}
-                </span>
+                />
+                <span style={{ fontSize: 10, color: "var(--gray)" }}>{t}</span>
               </div>
             ))}
           </div>
-
-          {/* Barras agrupadas */}
           <div
             style={{
               display: "flex",
-              gap: "8px",
+              gap: 8,
               alignItems: "flex-end",
               overflowX: "auto",
-              paddingBottom: "8px",
+              paddingBottom: 8,
             }}
           >
             {enviosMes.meses?.map((mes) => {
@@ -928,16 +1079,16 @@ export default function Dashboard() {
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
-                    minWidth: "80px",
+                    minWidth: 80,
                     flex: 1,
                   }}
                 >
                   <div
                     style={{
                       display: "flex",
-                      gap: "3px",
+                      gap: 3,
                       alignItems: "flex-end",
-                      height: "120px",
+                      height: 120,
                       width: "100%",
                     }}
                   >
@@ -962,9 +1113,9 @@ export default function Dashboard() {
                           {val > 0 && (
                             <div
                               style={{
-                                fontSize: "8px",
+                                fontSize: 8,
                                 color: COLORES[i % COLORES.length],
-                                marginBottom: "2px",
+                                marginBottom: 2,
                                 fontFamily: "var(--font-mono)",
                               }}
                             >
@@ -986,16 +1137,16 @@ export default function Dashboard() {
                   </div>
                   <div
                     style={{
-                      height: "1px",
+                      height: 1,
                       background: "var(--blk4)",
                       width: "100%",
                     }}
-                  ></div>
+                  />
                   <div
                     style={{
-                      fontSize: "9px",
+                      fontSize: 9,
                       color: "var(--gray)",
-                      marginTop: "5px",
+                      marginTop: 5,
                       textAlign: "center",
                     }}
                   >
@@ -1003,7 +1154,7 @@ export default function Dashboard() {
                   </div>
                   <div
                     style={{
-                      fontSize: "9px",
+                      fontSize: 9,
                       color: "var(--wht3)",
                       fontFamily: "var(--font-mono)",
                     }}
@@ -1017,13 +1168,13 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Syncs */}
+      {/* ── Syncs ── */}
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(3, minmax(0,1fr))",
-          gap: "10px",
-          marginBottom: "16px",
+          gap: 10,
+          marginBottom: 16,
         }}
       >
         {[
@@ -1037,7 +1188,7 @@ export default function Dashboard() {
               : null,
           },
           {
-            titulo: "Ultimo Excel Estelar",
+            titulo: "Último Excel Estelar",
             icono: "📥",
             data: syncs.excel_estelar,
             color: "#55AAFF",
@@ -1046,7 +1197,7 @@ export default function Dashboard() {
               : null,
           },
           {
-            titulo: "Ultimo Excel TCC",
+            titulo: "Último Excel TCC",
             icono: "📥",
             data: syncs.excel_tcc,
             color: "#AA88FF",
@@ -1060,7 +1211,7 @@ export default function Dashboard() {
             style={{
               background: "var(--blk2)",
               border: "1px solid var(--blk4)",
-              borderRadius: "8px",
+              borderRadius: 8,
               padding: "12px 14px",
             }}
           >
@@ -1068,17 +1219,13 @@ export default function Dashboard() {
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: "7px",
-                marginBottom: "6px",
+                gap: 7,
+                marginBottom: 6,
               }}
             >
-              <span style={{ fontSize: "14px" }}>{icono}</span>
+              <span style={{ fontSize: 14 }}>{icono}</span>
               <span
-                style={{
-                  fontSize: "11px",
-                  fontWeight: "500",
-                  color: "var(--wht2)",
-                }}
+                style={{ fontSize: 11, fontWeight: 500, color: "var(--wht2)" }}
               >
                 {titulo}
               </span>
@@ -1087,10 +1234,10 @@ export default function Dashboard() {
               <>
                 <div
                   style={{
-                    fontSize: "11px",
+                    fontSize: 11,
                     color,
-                    fontWeight: "500",
-                    marginBottom: "2px",
+                    fontWeight: 500,
+                    marginBottom: 2,
                   }}
                 >
                   {format(
@@ -1099,12 +1246,12 @@ export default function Dashboard() {
                     { locale: es },
                   )}
                 </div>
-                <div style={{ fontSize: "10px", color: "var(--gray)" }}>
+                <div style={{ fontSize: 10, color: "var(--gray)" }}>
                   {detalle}
                 </div>
               </>
             ) : (
-              <div style={{ fontSize: "11px", color: "var(--gray)" }}>
+              <div style={{ fontSize: 11, color: "var(--gray)" }}>
                 Sin registros aún
               </div>
             )}
@@ -1112,174 +1259,271 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Guías recientes */}
+      {/* ── Tabla mejorada ── */}
       <div
         style={{
           background: "var(--blk2)",
           border: "1px solid var(--blk4)",
-          borderRadius: "10px",
+          borderRadius: 10,
           overflow: "hidden",
         }}
       >
+        {/* Cabecera tabla */}
         <div
           style={{
             padding: "12px 16px",
-            fontSize: "10px",
-            color: "var(--gray)",
-            textTransform: "uppercase",
-            letterSpacing: ".05em",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
             borderBottom: "1px solid var(--blk4)",
+            gap: 12,
+            flexWrap: "wrap",
           }}
         >
-          Guías ingresadas recientemente
-        </div>
-        <table
-          style={{
-            width: "100%",
-            borderCollapse: "collapse",
-            fontSize: "12px",
-          }}
-        >
-          <thead>
-            <tr>
-              {[
-                "N° Guía",
-                "Transportadora",
-                "Cliente",
-                "Asesor",
-                "Ciudad",
-                "Fecha",
-                "Estado",
-              ].map((h) => (
-                <th
-                  key={h}
-                  style={{
-                    textAlign: "left",
-                    padding: "8px 12px",
-                    fontSize: "10px",
-                    color: "var(--gray)",
-                    borderBottom: "1px solid var(--blk4)",
-                    textTransform: "uppercase",
-                    letterSpacing: ".04em",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {ultimasGuias.map((g) => (
-              <tr
-                key={g.numero_guia}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = "var(--blk3)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = "transparent")
-                }
-              >
-                <td
-                  style={{
-                    padding: "8px 12px",
-                    borderBottom: "1px solid var(--blk3)",
-                    color: "var(--wht)",
-                    fontFamily: "var(--font-mono)",
-                    fontSize: "11px",
-                  }}
-                >
-                  {g.numero_guia}
-                </td>
-                <td
-                  style={{
-                    padding: "8px 12px",
-                    borderBottom: "1px solid var(--blk3)",
-                  }}
-                >
-                  {g.transportadora === "otra" ? (
-                    <span
-                      style={{
-                        fontSize: "10px",
-                        padding: "2px 6px",
-                        borderRadius: "20px",
-                        background: "#1a0a2e",
-                        border: "1px solid #3d1a66",
-                        color: "#AA88FF",
-                      }}
-                    >
-                      {g.transportadora_nombre
-                        ?.split(" ")
-                        .slice(0, 2)
-                        .join(" ") || "Otra"}
-                    </span>
-                  ) : (
-                    <PillTransportadora transportadora={g.transportadora} />
-                  )}
-                </td>
-                <td
-                  style={{
-                    padding: "8px 12px",
-                    borderBottom: "1px solid var(--blk3)",
-                    color: "var(--wht2)",
-                  }}
-                >
-                  {g.clientes?.nombre || "—"}
-                </td>
-                <td
-                  style={{
-                    padding: "8px 12px",
-                    borderBottom: "1px solid var(--blk3)",
-                    color: "var(--gray)",
-                    fontSize: "11px",
-                  }}
-                >
-                  {g.clientes?.usuarios?.nombre || "—"}
-                </td>
-                <td
-                  style={{
-                    padding: "8px 12px",
-                    borderBottom: "1px solid var(--blk3)",
-                    color: "var(--wht2)",
-                  }}
-                >
-                  {g.ciudad_destino || "—"}
-                </td>
-                <td
-                  style={{
-                    padding: "8px 12px",
-                    borderBottom: "1px solid var(--blk3)",
-                    color: "var(--gray)",
-                    fontSize: "11px",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {g.fecha_guia
-                    ? format(parseISO(g.fecha_guia), "d MMM yy", { locale: es })
-                    : "—"}
-                </td>
-                <td
-                  style={{
-                    padding: "8px 12px",
-                    borderBottom: "1px solid var(--blk3)",
-                  }}
-                >
-                  <PillEstado estado={g.estado} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {ultimasGuias.length === 0 && (
           <div
             style={{
-              padding: "24px",
-              textAlign: "center",
+              fontSize: 10,
               color: "var(--gray)",
-              fontSize: "12px",
+              textTransform: "uppercase",
+              letterSpacing: ".05em",
             }}
           >
-            Sin guías aún
+            Guías recientes · {tablaFiltrada.length} resultado
+            {tablaFiltrada.length !== 1 ? "s" : ""}
+          </div>
+          <input
+            placeholder="Buscar guía, cliente, ciudad, asesor..."
+            value={buscar}
+            onChange={(e) => {
+              setBuscar(e.target.value);
+              setPagina(0);
+            }}
+            style={{
+              background: "var(--blk3)",
+              border: "1px solid var(--blk5)",
+              borderRadius: 6,
+              padding: "5px 11px",
+              color: "var(--wht)",
+              fontSize: 12,
+              width: 260,
+              outline: "none",
+              fontFamily: "var(--font-body)",
+            }}
+          />
+        </div>
+
+        {/* Tabla */}
+        <div style={{ overflowX: "auto" }}>
+          <table
+            style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}
+          >
+            <thead>
+              <tr>
+                {[
+                  "N° Guía",
+                  "Transportadora",
+                  "Cliente",
+                  "Asesor",
+                  "Ciudad",
+                  "Fecha",
+                  "Días activos",
+                  "Estado",
+                ].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      textAlign: "left",
+                      padding: "8px 12px",
+                      fontSize: 10,
+                      color: "var(--gray)",
+                      borderBottom: "1px solid var(--blk4)",
+                      textTransform: "uppercase",
+                      letterSpacing: ".04em",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tablaVisible.map((g) => {
+                const dias = g.fecha_guia
+                  ? Math.floor((new Date() - new Date(g.fecha_guia)) / 86400000)
+                  : null;
+                const diasColor =
+                  dias == null
+                    ? "var(--gray)"
+                    : dias > 6
+                      ? "var(--danger)"
+                      : dias > 3
+                        ? "var(--warn)"
+                        : "var(--m)";
+                return (
+                  <tr
+                    key={g.numero_guia}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.background = "var(--blk3)")
+                    }
+                    onMouseLeave={(e) =>
+                      (e.currentTarget.style.background = "transparent")
+                    }
+                    onClick={() => navigate("/guias?buscar=" + g.numero_guia)}
+                    style={{ cursor: "pointer" }}
+                  >
+                    <td
+                      style={{
+                        padding: "8px 12px",
+                        borderBottom: "1px solid var(--blk3)",
+                        color: "var(--wht)",
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 11,
+                      }}
+                    >
+                      {g.numero_guia}
+                    </td>
+                    <td
+                      style={{
+                        padding: "8px 12px",
+                        borderBottom: "1px solid var(--blk3)",
+                      }}
+                    >
+                      <PillTransportadora transportadora={g.transportadora} />
+                    </td>
+                    <td
+                      style={{
+                        padding: "8px 12px",
+                        borderBottom: "1px solid var(--blk3)",
+                        color: "var(--wht2)",
+                        maxWidth: 160,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {g.clientes?.nombre || "—"}
+                    </td>
+                    <td
+                      style={{
+                        padding: "8px 12px",
+                        borderBottom: "1px solid var(--blk3)",
+                        color: "var(--gray)",
+                        fontSize: 11,
+                      }}
+                    >
+                      {g.clientes?.usuarios?.nombre || "—"}
+                    </td>
+                    <td
+                      style={{
+                        padding: "8px 12px",
+                        borderBottom: "1px solid var(--blk3)",
+                        color: "var(--wht2)",
+                      }}
+                    >
+                      {g.ciudad_destino || "—"}
+                    </td>
+                    <td
+                      style={{
+                        padding: "8px 12px",
+                        borderBottom: "1px solid var(--blk3)",
+                        color: "var(--gray)",
+                        fontSize: 11,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {g.fecha_guia
+                        ? format(parseISO(g.fecha_guia), "d MMM yy", {
+                            locale: es,
+                          })
+                        : "—"}
+                    </td>
+                    <td
+                      style={{
+                        padding: "8px 12px",
+                        borderBottom: "1px solid var(--blk3)",
+                        textAlign: "center",
+                      }}
+                    >
+                      {dias != null ? (
+                        <span
+                          style={{
+                            fontFamily: "var(--font-mono)",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: diasColor,
+                            background:
+                              dias > 6
+                                ? "rgba(255,68,68,0.12)"
+                                : dias > 3
+                                  ? "rgba(255,170,0,0.12)"
+                                  : "rgba(170,255,0,0.1)",
+                            padding: "2px 8px",
+                            borderRadius: 4,
+                          }}
+                        >
+                          {dias}d
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td
+                      style={{
+                        padding: "8px 12px",
+                        borderBottom: "1px solid var(--blk3)",
+                      }}
+                    >
+                      <PillEstado estado={g.estado} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {tablaFiltrada.length === 0 && (
+          <div
+            style={{
+              padding: 24,
+              textAlign: "center",
+              color: "var(--gray)",
+              fontSize: 12,
+            }}
+          >
+            {buscar ? `Sin resultados para "${buscar}"` : "Sin guías aún"}
+          </div>
+        )}
+
+        {/* Paginación */}
+        {totalPags > 1 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "10px 16px",
+              borderTop: "1px solid var(--blk4)",
+            }}
+          >
+            <span style={{ fontSize: 11, color: "var(--gray)" }}>
+              Página {pagina + 1} de {totalPags} · {tablaFiltrada.length} guías
+            </span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <Btn
+                onClick={() => setPagina((p) => Math.max(0, p - 1))}
+                disabled={pagina === 0}
+              >
+                ← Anterior
+              </Btn>
+              <Btn
+                onClick={() => setPagina((p) => Math.min(totalPags - 1, p + 1))}
+                disabled={pagina >= totalPags - 1}
+              >
+                Siguiente →
+              </Btn>
+            </div>
           </div>
         )}
       </div>
