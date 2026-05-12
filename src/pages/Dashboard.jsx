@@ -122,6 +122,254 @@ function PeriodoChips({ value, onChange }) {
   );
 }
 
+// ─── Donut chart SVG ─────────────────────────────────────────────────────────
+function DonutChart({ data, size = 160, stroke = 32, label, sublabel }) {
+  const r = (size - stroke) / 2;
+  const circ = 2 * Math.PI * r;
+  let offset = 0;
+  const slices = data.map((d) => {
+    const dash = (d.pct / 100) * circ;
+    const slice = { ...d, dash, offset };
+    offset += dash;
+    return slice;
+  });
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+      <div style={{ position: "relative", flexShrink: 0 }}>
+        <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke="var(--blk4)"
+            strokeWidth={stroke}
+          />
+          {slices.map((s, i) => (
+            <circle
+              key={i}
+              cx={size / 2}
+              cy={size / 2}
+              r={r}
+              fill="none"
+              stroke={s.color}
+              strokeWidth={stroke}
+              strokeDasharray={`${s.dash} ${circ - s.dash}`}
+              strokeDashoffset={-s.offset}
+              style={{ transition: "stroke-dasharray .5s ease" }}
+            />
+          ))}
+        </svg>
+        {label && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              pointerEvents: "none",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 22,
+                fontWeight: 700,
+                color: "var(--wht)",
+                fontFamily: "var(--font-mono)",
+                lineHeight: 1,
+              }}
+            >
+              {label}
+            </span>
+            {sublabel && (
+              <span style={{ fontSize: 9, color: "var(--gray)", marginTop: 3 }}>
+                {sublabel}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+      <div
+        style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }}
+      >
+        {data.map((d) => (
+          <div
+            key={d.nombre}
+            style={{ display: "flex", alignItems: "center", gap: 8 }}
+          >
+            <div
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: "50%",
+                background: d.color,
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ fontSize: 11, color: "var(--wht2)", flex: 1 }}>
+              {d.nombre}
+            </span>
+            <span
+              style={{
+                fontSize: 11,
+                color: d.color,
+                fontFamily: "var(--font-mono)",
+                fontWeight: 700,
+              }}
+            >
+              {d.count}
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                color: "var(--gray)",
+                width: 30,
+                textAlign: "right",
+              }}
+            >
+              {d.pct}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Line chart SVG ──────────────────────────────────────────────────────────
+function LineChartGuias({ data }) {
+  if (!data || data.length === 0)
+    return (
+      <div style={{ color: "var(--gray)", fontSize: 12, padding: "20px 0" }}>
+        Sin datos para el período
+      </div>
+    );
+
+  const W = 600,
+    H = 180,
+    PL = 36,
+    PR = 12,
+    PT = 12,
+    PB = 32;
+  const cW = W - PL - PR;
+  const cH = H - PT - PB;
+
+  const maxVal = Math.max(
+    ...data.map((d) => Math.max(d.nuevas, d.entregadas)),
+    1,
+  );
+  const xStep = data.length > 1 ? cW / (data.length - 1) : cW;
+
+  const toX = (i) => PL + (data.length > 1 ? i * xStep : cW / 2);
+  const toY = (v) => PT + cH - (v / maxVal) * cH;
+
+  const pathNuevas = data
+    .map((d, i) => `${i === 0 ? "M" : "L"}${toX(i)},${toY(d.nuevas)}`)
+    .join(" ");
+  const pathEntregadas = data
+    .map((d, i) => `${i === 0 ? "M" : "L"}${toX(i)},${toY(d.entregadas)}`)
+    .join(" ");
+
+  // area fills
+  const areaBase = `L${toX(data.length - 1)},${PT + cH} L${PL},${PT + cH} Z`;
+  const areaNuevas = pathNuevas + " " + areaBase;
+  const areaEntregadas = pathEntregadas + " " + areaBase;
+
+  // pick every Nth label to avoid crowding
+  const step = Math.max(1, Math.ceil(data.length / 8));
+  const tickIndices = data
+    .map((_, i) => i)
+    .filter((i) => i % step === 0 || i === data.length - 1);
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: "100%", height: "auto", overflow: "visible" }}
+    >
+      <defs>
+        <linearGradient id="gradNuevas" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#55AAFF" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="#55AAFF" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient id="gradEnt" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#AAFF00" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="#AAFF00" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+
+      {/* Y grid lines */}
+      {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+        const y = PT + cH - t * cH;
+        return (
+          <g key={t}>
+            <line
+              x1={PL}
+              y1={y}
+              x2={PL + cW}
+              y2={y}
+              stroke="var(--blk4)"
+              strokeWidth="1"
+            />
+            <text
+              x={PL - 4}
+              y={y + 4}
+              fill="var(--gray)"
+              fontSize="9"
+              textAnchor="end"
+            >
+              {Math.round(t * maxVal)}
+            </text>
+          </g>
+        );
+      })}
+
+      {/* Areas */}
+      <path d={areaNuevas} fill="url(#gradNuevas)" />
+      <path d={areaEntregadas} fill="url(#gradEnt)" />
+
+      {/* Lines */}
+      <path
+        d={pathNuevas}
+        fill="none"
+        stroke="#55AAFF"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path
+        d={pathEntregadas}
+        fill="none"
+        stroke="#AAFF00"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+
+      {/* Dots on hover would need JS; add static dots */}
+      {data.map((d, i) => (
+        <g key={i}>
+          <circle cx={toX(i)} cy={toY(d.nuevas)} r="3" fill="#55AAFF" />
+          <circle cx={toX(i)} cy={toY(d.entregadas)} r="3" fill="#AAFF00" />
+        </g>
+      ))}
+
+      {/* X axis labels */}
+      {tickIndices.map((i) => (
+        <text
+          key={i}
+          x={toX(i)}
+          y={H - 6}
+          fill="var(--gray)"
+          fontSize="9"
+          textAnchor="middle"
+        >
+          {data[i].dia.substring(5)}
+        </text>
+      ))}
+    </svg>
+  );
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
 
@@ -355,6 +603,87 @@ export default function Dashboard() {
       ),
     ];
     return { meses: mesesOrdenados, transportadoras, datos: meses };
+  }, [guiasFiltradas]);
+
+  // ── Guías nuevas vs entregadas por día ───────────────────────────────────
+  const nuevasVsEntregadasPorDia = useMemo(() => {
+    const dias = {};
+    guiasFiltradas.forEach((g) => {
+      if (!g.fecha_guia) return;
+      const dia = g.fecha_guia.substring(0, 10);
+      if (!dias[dia]) dias[dia] = { nuevas: 0, entregadas: 0 };
+      dias[dia].nuevas++;
+      if (g.estado === "entregado") dias[dia].entregadas++;
+    });
+    return Object.entries(dias)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([dia, v]) => ({ dia, ...v }));
+  }, [guiasFiltradas]);
+
+  // ── Donut transportadoras (todas las guías filtradas) ─────────────────────
+  const donutTransportadoras = useMemo(() => {
+    const m = {};
+    guiasFiltradas.forEach((g) => {
+      const key =
+        g.transportadora_nombre ||
+        (g.transportadora === "estelar"
+          ? "Estelar Express"
+          : g.transportadora === "tcc"
+            ? "TCC"
+            : g.transportadora || "Otra");
+      m[key] = (m[key] || 0) + 1;
+    });
+    const total = Object.values(m).reduce((s, v) => s + v, 0) || 1;
+    const TRANS_COLORS = [
+      "#AAFF00",
+      "#AA88FF",
+      "#55AAFF",
+      "#FFAA00",
+      "#FF6655",
+      "#44DDBB",
+    ];
+    return Object.entries(m)
+      .sort((a, b) => b[1] - a[1])
+      .map(([nombre, count], i) => ({
+        nombre,
+        count,
+        pct: Math.round((count / total) * 100),
+        color: TRANS_COLORS[i % TRANS_COLORS.length],
+      }));
+  }, [guiasFiltradas]);
+
+  // ── Donut entregadas vs no entregadas ─────────────────────────────────────
+  const donutEntregadas = useMemo(() => {
+    const entregadas = guiasFiltradas.filter(
+      (g) => g.estado === "entregado",
+    ).length;
+    const noEntregadas = guiasFiltradas.filter(
+      (g) => g.estado !== "entregado" && g.estado !== "anulada",
+    ).length;
+    const anuladas = guiasFiltradas.filter(
+      (g) => g.estado === "anulada",
+    ).length;
+    const total = entregadas + noEntregadas + anuladas || 1;
+    return [
+      {
+        nombre: "Entregadas",
+        count: entregadas,
+        pct: Math.round((entregadas / total) * 100),
+        color: "#AAFF00",
+      },
+      {
+        nombre: "En curso",
+        count: noEntregadas,
+        pct: Math.round((noEntregadas / total) * 100),
+        color: "#55AAFF",
+      },
+      {
+        nombre: "Anuladas",
+        count: anuladas,
+        pct: Math.round((anuladas / total) * 100),
+        color: "#555",
+      },
+    ].filter((d) => d.count > 0);
   }, [guiasFiltradas]);
 
   // ── Tabla mejorada (recientes) ────────────────────────────────────────────
@@ -776,6 +1105,124 @@ export default function Dashboard() {
           <div style={{ fontSize: 10, color: "var(--gray)", marginTop: 4 }}>
             guías en curso
           </div>
+        </div>
+      </div>
+
+      {/* ── Guías nuevas vs entregadas por día ── */}
+      <div
+        style={{
+          background: "var(--blk2)",
+          border: "1px solid var(--blk4)",
+          borderRadius: 10,
+          padding: 20,
+          marginBottom: 16,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 4,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--wht)" }}>
+            Guías nuevas vs entregadas por día
+          </div>
+          <div style={{ display: "flex", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <div
+                style={{
+                  width: 10,
+                  height: 3,
+                  background: "#55AAFF",
+                  borderRadius: 2,
+                }}
+              />
+              <span style={{ fontSize: 10, color: "var(--gray)" }}>Nuevas</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <div
+                style={{
+                  width: 10,
+                  height: 3,
+                  background: "#AAFF00",
+                  borderRadius: 2,
+                }}
+              />
+              <span style={{ fontSize: 10, color: "var(--gray)" }}>
+                Entregadas
+              </span>
+            </div>
+          </div>
+        </div>
+        <div style={{ fontSize: 10, color: "var(--gray)", marginBottom: 16 }}>
+          {rango ? `${rango.desde} → ${rango.hasta}` : "Últimos 6 meses"}
+        </div>
+        <LineChartGuias data={nuevasVsEntregadasPorDia} />
+      </div>
+
+      {/* ── Donuts: transportadoras + entregadas/no entregadas ── */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 16,
+          marginBottom: 16,
+        }}
+      >
+        {/* Donut transportadoras */}
+        <div
+          style={{
+            background: "var(--blk2)",
+            border: "1px solid var(--blk4)",
+            borderRadius: 10,
+            padding: 20,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              color: "var(--gray)",
+              textTransform: "uppercase",
+              letterSpacing: ".05em",
+              marginBottom: 16,
+            }}
+          >
+            Distribución por transportadora
+          </div>
+          <DonutChart
+            data={donutTransportadoras}
+            label={guiasFiltradas.length}
+            sublabel="guías"
+          />
+        </div>
+
+        {/* Donut entregadas vs no */}
+        <div
+          style={{
+            background: "var(--blk2)",
+            border: "1px solid var(--blk4)",
+            borderRadius: 10,
+            padding: 20,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              color: "var(--gray)",
+              textTransform: "uppercase",
+              letterSpacing: ".05em",
+              marginBottom: 16,
+            }}
+          >
+            Estado de entrega
+          </div>
+          <DonutChart
+            data={donutEntregadas}
+            label={kpis.tasaEnt + "%"}
+            sublabel="tasa entrega"
+          />
         </div>
       </div>
 
