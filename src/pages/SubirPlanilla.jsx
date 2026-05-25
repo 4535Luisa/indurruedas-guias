@@ -3,7 +3,6 @@ import { supabase } from "../lib/supabase";
 import { PageHeader, Btn } from "../components/UI";
 import * as pdfjsLib from "pdfjs-dist";
 
-// Usar el worker que viene incluido en el paquete instalado
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url,
@@ -11,7 +10,6 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 
 function parsearFecha(str) {
   if (!str) return null;
-  // formato dd-mm-yyyy o dd/mm/yyyy
   const match = str.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
   if (match) {
     const d = match[1].padStart(2, "0");
@@ -22,15 +20,6 @@ function parsearFecha(str) {
   return null;
 }
 
-function limpiarFactura(doc) {
-  if (!doc) return null;
-  // Quitar ceros: FBG-00045212 → FBG-45212, REM-00031569 → REM-31569
-  return doc.replace(
-    /(FBG|FBC|REM|ACC)-0+(\d+)/i,
-    (_, pre, num) => `${pre.toUpperCase()}-${num}`,
-  );
-}
-
 async function extraerTextoPDF(file) {
   const buffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
@@ -38,8 +27,6 @@ async function extraerTextoPDF(file) {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-
-    // Agrupar items por posición Y (línea)
     const filas = {};
     for (const item of content.items) {
       const y = Math.round(item.transform[5]);
@@ -47,15 +34,11 @@ async function extraerTextoPDF(file) {
       if (!filas[y]) filas[y] = [];
       filas[y].push({ x, str: item.str.trim() });
     }
-
-    // Ordenar por Y descendente y concatenar cada fila
     const ysOrdenados = Object.keys(filas)
       .map(Number)
       .sort((a, b) => b - a);
     for (const y of ysOrdenados) {
       const palabras = filas[y].sort((a, b) => a.x - b.x);
-      // Guardar como línea con marcadores de columna
-      // formato: "x:texto x:texto ..."
       const linea = palabras.map((p) => `${p.x}:${p.str}`).join("|");
       if (linea.trim()) textoCompleto += linea + "\n";
     }
@@ -77,31 +60,23 @@ function parsearPlanilla(texto) {
   };
 
   for (const linea of lineas) {
-    // Reconstruir texto plano para búsquedas generales
     const textoPlano = linea
       .split("|")
       .map((p) => p.split(":").slice(1).join(":"))
       .join(" ");
 
-    // Número de planilla
     if (!resultado.numero_planilla) {
       const m = textoPlano.match(/RTF-(\d+)/i);
       if (m) resultado.numero_planilla = `RTF-${m[1]}`;
     }
-
-    // Fecha
     if (!resultado.fecha_planilla) {
       const m = textoPlano.match(/Fecha[:\s]+(\d{2}[-/]\d{2}[-/]\d{4})/i);
       if (m) resultado.fecha_planilla = parsearFecha(m[1]);
     }
-
-    // NIT transportadora
     if (!resultado.nit_transportadora) {
       const m = textoPlano.match(/Nit[:\s]+(\d[\d\-]+)/i);
       if (m) resultado.nit_transportadora = m[1].replace(/-\d+$/, "");
     }
-
-    // Transportadora
     if (!resultado.transportadora) {
       const m = textoPlano.match(
         /Transportador[:\s]+([A-Z][A-Z\s\.]+?)(?:\s+Nit|\s*$)/i,
@@ -109,7 +84,6 @@ function parsearPlanilla(texto) {
       if (m) resultado.transportadora = m[1].trim();
     }
 
-    // Filas de guías — parsear usando posiciones X
     const partes = linea
       .split("|")
       .map((p) => {
@@ -118,25 +92,18 @@ function parsearPlanilla(texto) {
       })
       .filter((p) => !isNaN(p.x) && p.str);
 
-    // Verificar si la primera columna es una factura
     const primeraCol = partes[0];
     if (!primeraCol) continue;
     const facturaMatch = primeraCol.str.match(/^(FBG|FBC|REM|ACC)-0*(\d+)$/i);
     if (!facturaMatch) continue;
 
     const factura = `${facturaMatch[1].toUpperCase()}-${facturaMatch[2]}`;
-
-    // Separar por rangos X:
-    // x < 230 → cliente
-    // x 230-312 → ciudad
-    // x 312-450 → dirección
     const clienteParts = partes
       .filter((p) => p.x >= 90 && p.x < 230)
       .map((p) => p.str);
     const ciudadParts = partes
       .filter((p) => p.x >= 230 && p.x < 312)
       .map((p) => p.str);
-    // Dirección: entre x=312 y x=450, excluir números con coma (peso) y $ (valor)
     const dirParts = partes
       .filter((p) => p.x >= 312 && p.x < 450)
       .filter(
@@ -156,7 +123,6 @@ function parsearPlanilla(texto) {
       resultado.guias.push({ factura, cliente, ciudad, direccion });
     }
   }
-
   return resultado;
 }
 
@@ -169,7 +135,8 @@ export default function SubirPlanilla() {
   const [editando, setEditando] = useState([]);
   const [guardando, setGuardando] = useState(false);
   const [resultado, setResultado] = useState(null);
-  const [textoRaw, setTextoRaw] = useState("");
+  // guías ya existentes con transportadora diferente
+  const [conflictos, setConflictos] = useState([]);
   const fileRef = useRef();
 
   useEffect(() => {
@@ -192,15 +159,14 @@ export default function SubirPlanilla() {
     setProcesando(true);
     setPlanilla(null);
     setResultado(null);
+    setConflictos([]);
 
     try {
       const texto = await extraerTextoPDF(file);
-      setTextoRaw(texto);
       const datos = parsearPlanilla(texto);
       setPlanilla(datos);
       setEditando(datos.guias.map((g) => ({ ...g, incluir: true })));
 
-      // Autoseleccionar transportadora si coincide NIT
       if (datos.nit_transportadora) {
         const trans = transportadoras.find((t) =>
           t.nit?.includes(datos.nit_transportadora),
@@ -213,44 +179,106 @@ export default function SubirPlanilla() {
     setProcesando(false);
   }
 
-  async function guardarGuias() {
+  // Verificar conflictos antes de guardar
+  async function verificarYGuardar() {
     if (!transportadoraId) {
       alert("Selecciona la transportadora");
       return;
     }
-    setGuardando(true);
 
     const trans = transportadoras.find((t) => t.id === transportadoraId);
     const guiasAGuardar = editando.filter((g) => g.incluir && g.factura);
 
+    // Generar números de guía
+    const planillaCorta = (planilla.numero_planilla || "RTF-0").replace(
+      /RTF-0+(\d+)/i,
+      "RTF-$1",
+    );
+    const numerosGuia = guiasAGuardar.map(
+      (_, i) => `${planillaCorta}-${i + 1}`,
+    );
+
+    // Buscar existentes
+    const { data: existentes } = await supabase
+      .from("guias")
+      .select(
+        "id, numero_guia, transportadora_nombre, transportadora_id, fecha_guia",
+      )
+      .in("numero_guia", numerosGuia);
+
+    const existentesMap = {};
+    (existentes || []).forEach((g) => {
+      existentesMap[g.numero_guia] = g;
+    });
+
+    // Detectar conflictos de transportadora
+    const nuevosConflictos = [];
+    guiasAGuardar.forEach((g, i) => {
+      const numGuia = `${planillaCorta}-${i + 1}`;
+      const existente = existentesMap[numGuia];
+      if (existente && existente.transportadora_id !== transportadoraId) {
+        nuevosConflictos.push({
+          numero_guia: numGuia,
+          factura: g.factura,
+          trans_anterior: existente.transportadora_nombre,
+          trans_nueva: trans.nombre,
+          id: existente.id,
+          corregir: true,
+        });
+      }
+    });
+
+    if (nuevosConflictos.length > 0) {
+      setConflictos(nuevosConflictos);
+      return; // Mostrar conflictos antes de guardar
+    }
+
+    await guardarGuias(existentesMap, planillaCorta, trans, guiasAGuardar);
+  }
+
+  async function guardarGuias(
+    existentesMap,
+    planillaCorta,
+    trans,
+    guiasAGuardar,
+  ) {
+    setGuardando(true);
+    setConflictos([]);
+
     let nuevas = 0,
+      actualizadas = 0,
       duplicadas = 0,
       errores = 0;
-    let indice = 1;
-    for (const g of guiasAGuardar) {
-      const planillaCorta = (planilla.numero_planilla || "RTF-0").replace(
-        /RTF-0+(\d+)/i,
-        "RTF-$1",
-      );
-      const numeroGuia = `${planillaCorta}-${indice}`;
 
-      // Verificar si ya existe por numero_guia
-      const { data: existe } = await supabase
-        .from("guias")
-        .select("id")
-        .eq("numero_guia", numeroGuia)
-        .maybeSingle();
-      if (existe) {
-        duplicadas++;
-        indice++;
+    for (let i = 0; i < guiasAGuardar.length; i++) {
+      const g = guiasAGuardar[i];
+      const numeroGuia = `${planillaCorta}-${i + 1}`;
+      const existente = existentesMap?.[numeroGuia];
+
+      if (existente) {
+        // Ya existe — actualizar transportadora si se pidió corregir
+        const conflicto = conflictos.find((c) => c.numero_guia === numeroGuia);
+        if (conflicto?.corregir) {
+          await supabase
+            .from("guias")
+            .update({
+              transportadora_nombre: trans.nombre,
+              transportadora_id: transportadoraId,
+              fecha_guia: planilla.fecha_planilla,
+              fecha_planilla: planilla.fecha_planilla,
+            })
+            .eq("id", existente.id);
+          actualizadas++;
+        } else {
+          duplicadas++;
+        }
         continue;
       }
 
-      // Buscar cliente por nombre completo
+      // Buscar cliente
       let clienteId = null;
-      if (g.cliente && g.cliente.trim().length > 2) {
+      if (g.cliente?.trim().length > 2) {
         const nombreLimpio = g.cliente.trim();
-        // Exacto primero
         const { data: exacto } = await supabase
           .from("clientes")
           .select("id")
@@ -259,7 +287,6 @@ export default function SubirPlanilla() {
         if (exacto?.[0]) {
           clienteId = exacto[0].id;
         } else {
-          // Conteniendo el nombre completo
           const { data: parcial } = await supabase
             .from("clientes")
             .select("id")
@@ -286,16 +313,14 @@ export default function SubirPlanilla() {
         activa: true,
       });
 
-      if (!error) {
-        nuevas++;
-        indice++;
-      } else errores++;
+      if (!error) nuevas++;
+      else errores++;
     }
 
     await supabase.from("sync_log").insert({
       transportadora: "otra",
       guias_nuevas: nuevas,
-      guias_actualizadas: 0,
+      guias_actualizadas: actualizadas,
       errores,
       detalle: {
         planilla: planilla.numero_planilla,
@@ -303,8 +328,29 @@ export default function SubirPlanilla() {
       },
     });
 
-    setResultado({ nuevas, duplicadas, errores });
+    setResultado({ nuevas, actualizadas, duplicadas, errores });
     setGuardando(false);
+  }
+
+  async function confirmarConflictos() {
+    const trans = transportadoras.find((t) => t.id === transportadoraId);
+    const guiasAGuardar = editando.filter((g) => g.incluir && g.factura);
+    const planillaCorta = (planilla.numero_planilla || "RTF-0").replace(
+      /RTF-0+(\d+)/i,
+      "RTF-$1",
+    );
+    const numerosGuia = guiasAGuardar.map(
+      (_, i) => `${planillaCorta}-${i + 1}`,
+    );
+    const { data: existentes } = await supabase
+      .from("guias")
+      .select("id, numero_guia, transportadora_nombre, transportadora_id")
+      .in("numero_guia", numerosGuia);
+    const existentesMap = {};
+    (existentes || []).forEach((g) => {
+      existentesMap[g.numero_guia] = g;
+    });
+    await guardarGuias(existentesMap, planillaCorta, trans, guiasAGuardar);
   }
 
   return (
@@ -431,7 +477,9 @@ export default function SubirPlanilla() {
                 },
                 {
                   label: "Fecha",
-                  value: planilla.fecha_planilla || "No detectado",
+                  value: planilla.fecha_planilla
+                    ? `${planilla.fecha_planilla} ✓`
+                    : "No detectado",
                 },
                 {
                   label: "Transportadora detectada",
@@ -451,12 +499,16 @@ export default function SubirPlanilla() {
                   }}
                 >
                   <span style={{ color: "var(--gray)" }}>{label}</span>
-                  <span style={{ color: "var(--wht)", fontWeight: "500" }}>
+                  <span
+                    style={{
+                      color: label === "Fecha" ? "var(--m)" : "var(--wht)",
+                      fontWeight: "500",
+                    }}
+                  >
                     {value}
                   </span>
                 </div>
               ))}
-
               <div style={{ marginTop: "8px" }}>
                 <div
                   style={{
@@ -467,7 +519,7 @@ export default function SubirPlanilla() {
                     marginBottom: "5px",
                   }}
                 >
-                  Transportadora en sistema
+                  Transportadora en sistema *
                 </div>
                 <select
                   value={transportadoraId}
@@ -512,7 +564,7 @@ export default function SubirPlanilla() {
           }}
         >
           {resultado.error ||
-            `✓ ${resultado.nuevas} guías creadas · ${resultado.duplicadas} ya existían · ${resultado.errores} errores`}
+            `✓ ${resultado.nuevas} guías creadas · ${resultado.actualizadas || 0} actualizadas · ${resultado.duplicadas} ya existían · ${resultado.errores} errores`}
           <button
             onClick={() => setResultado(null)}
             style={{
@@ -526,6 +578,132 @@ export default function SubirPlanilla() {
           >
             ×
           </button>
+        </div>
+      )}
+
+      {/* Panel de conflictos de transportadora */}
+      {conflictos.length > 0 && (
+        <div
+          style={{
+            background: "#1a0800",
+            border: "1px solid var(--warn)",
+            borderRadius: "10px",
+            padding: "16px",
+            marginBottom: "16px",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "13px",
+              fontWeight: "500",
+              color: "var(--warn)",
+              marginBottom: "10px",
+            }}
+          >
+            ⚠️ {conflictos.length} guía{conflictos.length > 1 ? "s" : ""} ya
+            existen con transportadora diferente
+          </div>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
+              marginBottom: "14px",
+            }}
+          >
+            {conflictos.map((c, i) => (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "8px 10px",
+                  background: "rgba(255,170,0,0.07)",
+                  borderRadius: "6px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "11px",
+                    color: "var(--m)",
+                    minWidth: "100px",
+                  }}
+                >
+                  {c.numero_guia}
+                </span>
+                <span style={{ fontSize: "11px", color: "var(--gray)" }}>
+                  {c.factura}
+                </span>
+                <span style={{ fontSize: "11px", color: "var(--danger)" }}>
+                  {c.trans_anterior}
+                </span>
+                <span style={{ fontSize: "11px", color: "var(--gray)" }}>
+                  →
+                </span>
+                <span style={{ fontSize: "11px", color: "var(--m)" }}>
+                  {c.trans_nueva}
+                </span>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    fontSize: "11px",
+                    color: "var(--wht2)",
+                    marginLeft: "auto",
+                    cursor: "pointer",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={c.corregir}
+                    onChange={(e) =>
+                      setConflictos((prev) =>
+                        prev.map((x, j) =>
+                          j === i ? { ...x, corregir: e.target.checked } : x,
+                        ),
+                      )
+                    }
+                  />
+                  Corregir transportadora
+                </label>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              onClick={confirmarConflictos}
+              style={{
+                padding: "8px 16px",
+                background: "var(--warn)",
+                color: "var(--blk)",
+                border: "none",
+                borderRadius: "7px",
+                fontSize: "12px",
+                fontWeight: "500",
+                cursor: "pointer",
+              }}
+            >
+              Continuar y guardar
+            </button>
+            <button
+              onClick={() => setConflictos([])}
+              style={{
+                padding: "8px 14px",
+                background: "transparent",
+                border: "1px solid var(--blk5)",
+                borderRadius: "7px",
+                color: "var(--gray)",
+                fontSize: "12px",
+                cursor: "pointer",
+              }}
+            >
+              Cancelar
+            </button>
+          </div>
         </div>
       )}
 
@@ -569,7 +747,7 @@ export default function SubirPlanilla() {
               </span>
             </div>
             <Btn
-              onClick={guardarGuias}
+              onClick={verificarYGuardar}
               disabled={guardando || !transportadoraId}
             >
               {guardando
