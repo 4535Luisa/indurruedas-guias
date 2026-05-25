@@ -5,6 +5,7 @@ import Dashboard from "./pages/Dashboard";
 import Guias from "./pages/Guias";
 import Clientes from "./pages/Clientes";
 import Usuarios from "./pages/Usuarios";
+import Transportadoras from "./pages/Transportadoras";
 import AsesorGuias from "./pages/AsesorGuias";
 import TransportadorGuias from "./pages/TransportadorGuias";
 import VisualizadorDashboard from "./pages/VisualizadorDashboard";
@@ -48,8 +49,9 @@ export default function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/guias" element={<Guias />} />
           <Route path="/clientes" element={<Clientes />} />
-          <Route path="/usuarios" element={<Usuarios />} />
           <Route path="/planilla" element={<SubirPlanilla />} />
+          <Route path="/transportadoras" element={<Transportadoras />} />
+          <Route path="/usuarios" element={<Usuarios />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
       </Routes>

@@ -125,25 +125,13 @@ export default function Layout() {
             Indurruedas SAS
           </div>
           <div
-            style={{
-              fontSize: "10px",
-              color: "var(--gray)",
-              marginTop: "2px",
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-            }}
+            style={{ fontSize: "10px", color: "var(--gray)", marginTop: "2px" }}
           >
-            <img
-              src="/icon-envios.svg"
-              alt=""
-              style={{ width: "14px", height: "14px", opacity: 0.6 }}
-            />
             Sistema de guías
           </div>
         </div>
 
-        <nav style={{ flex: 1, padding: "12px 8px" }}>
+        <nav style={{ flex: 1, padding: "12px 8px", overflowY: "auto" }}>
           <NavLink to="/dashboard" style={linkStyle}>
             <span>▦</span> Dashboard
           </NavLink>
@@ -155,6 +143,9 @@ export default function Layout() {
           </NavLink>
           <NavLink to="/planilla" style={linkStyle}>
             <span>◐</span> Subir planilla
+          </NavLink>
+          <NavLink to="/transportadoras" style={linkStyle}>
+            <span>🚚</span> Transportadoras
           </NavLink>
           <NavLink to="/usuarios" style={linkStyle}>
             <span>◎</span> Usuarios
