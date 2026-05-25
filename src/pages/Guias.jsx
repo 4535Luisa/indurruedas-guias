@@ -39,15 +39,24 @@ function extraerFacturaEstelar(anexos) {
   const texto = String(anexos);
   const facturas = [];
 
-  // Buscar todos los patrones FB[GC]-NNNNN en el texto
-  // Primero reemplazar patrones dobles: FBG-NNNNN-NNNNN → FBG-NNNNN FBG-NNNNN
-  const textoExpandido = texto.replace(
-    /FB([GC])-(\d{4,})-(\d{4,})/gi,
-    (_, tipo, num1, num2) => `FB${tipo}-${num1} FB${tipo}-${num2}`,
+  // Expandir patrones de N facturas pegadas: FBG-46100-46101-46102-46103
+  // El regex captura FB[GC]- seguido de múltiples números separados por guión
+  let textoExpandido = texto.replace(
+    /FB([GC])-(\d+(?:-\d{4,})+)/gi,
+    (match, tipo, numeros) => {
+      const nums = numeros.split("-").filter((n) => n.length >= 4);
+      return nums.map((n) => `FB${tipo}-${n}`).join(" ");
+    },
   );
 
-  // Ahora extraer todos los FB[GC]-NNNNN
-  const matches = textoExpandido.match(/FB[GC]-\d+/gi);
+  // Manejar mezcla de tipos: FBG-46292ACC-1215 → FBG-46292 ACC-1215
+  textoExpandido = textoExpandido.replace(
+    /FB([GC])-(\d+)([A-Z]{2,3})-(\d+)/gi,
+    (_, tipo, num1, tipo2, num2) => `FB${tipo}-${num1} ${tipo2}-${num2}`,
+  );
+
+  // Extraer todas las facturas (FBG, FBC, ACC, REM)
+  const matches = textoExpandido.match(/(?:FB[GC]|ACC|REM)-\d+/gi);
   if (!matches) return null;
 
   // Limpiar y deduplicar
