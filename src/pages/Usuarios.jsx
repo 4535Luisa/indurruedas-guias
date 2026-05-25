@@ -4,6 +4,7 @@ import { PageHeader, Btn, Table, Th, Td } from "../components/UI";
 
 export default function Usuarios() {
   const [usuarios, setUsuarios] = useState([]);
+  const [transportadoras, setTransportadoras] = useState([]);
   const [loading, setLoading] = useState(true);
   const [creando, setCreando] = useState(false);
   const [form, setForm] = useState({
@@ -11,12 +12,14 @@ export default function Usuarios() {
     email: "",
     password: "",
     rol: "asesor",
+    transportadora_id: "",
   });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
 
   useEffect(() => {
     cargarUsuarios();
+    cargarTransportadoras();
   }, []);
 
   async function cargarUsuarios() {
@@ -30,74 +33,83 @@ export default function Usuarios() {
     setLoading(false);
   }
 
+  async function cargarTransportadoras() {
+    const { data } = await supabase
+      .from("transportadoras")
+      .select("id, nombre")
+      .eq("activa", true)
+      .order("nombre");
+    setTransportadoras(data || []);
+  }
+
   async function crearUsuario(e) {
     e.preventDefault();
+    if (!form.nombre.trim() || !form.email.trim() || !form.password.trim()) {
+      setMsg({
+        tipo: "error",
+        texto: "Nombre, correo y contraseña son requeridos",
+      });
+      return;
+    }
+    if (form.password.length < 6) {
+      setMsg({
+        tipo: "error",
+        texto: "La contraseña debe tener mínimo 6 caracteres",
+      });
+      return;
+    }
     setSaving(true);
     setMsg(null);
 
     try {
-      // Crear en Supabase Auth via API
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/auth/v1/admin/users`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({
-            email: form.email,
-            password: form.password,
-            email_confirm: true,
-          }),
-        },
-      );
+      // 1. Crear en Supabase Auth usando signUp
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: form.email.trim(),
+        password: form.password,
+        options: { data: { nombre: form.nombre.trim() } },
+      });
 
-      const authData = await res.json();
+      if (authError) throw new Error(authError.message);
+      if (!authData?.user) throw new Error("No se pudo crear el usuario");
 
-      if (!authData.id) {
-        // Usar signup normal
-        const { data: signupData, error: signupError } =
-          await supabase.auth.admin?.createUser({
-            email: form.email,
-            password: form.password,
-            email_confirm: true,
-          });
-        if (signupError) throw new Error(signupError.message);
-      }
+      // 2. Insertar en public.usuarios
+      const { error: insertError } = await supabase.from("usuarios").insert({
+        id: authData.user.id,
+        email: form.email.trim(),
+        nombre: form.nombre.trim().toUpperCase(),
+        rol: form.rol,
+        activo: true,
+        ...(form.rol === "transportador" && form.transportadora_id
+          ? { transportadora_id: form.transportadora_id }
+          : {}),
+      });
 
-      // Obtener el ID del usuario recién creado
-      const { data: authUser } = await supabase
-        .from("usuarios")
-        .select("id")
-        .eq("email", form.email)
-        .single();
-
-      // Si no existe en public.usuarios, insertarlo
-      if (!authUser) {
-        // Buscar en auth.users
-        const userId = authData.id;
-        if (userId) {
-          await supabase.from("usuarios").insert({
-            id: userId,
-            email: form.email,
-            nombre: form.nombre,
-            rol: form.rol,
-            activo: true,
-          });
-        }
-      }
+      if (insertError) throw new Error(insertError.message);
 
       setMsg({
         tipo: "ok",
-        texto: `Usuario ${form.nombre} creado. Debe ejecutar el SQL de vinculación en Supabase.`,
+        texto: `✓ Usuario ${form.nombre} creado correctamente como ${form.rol}`,
       });
-      setForm({ nombre: "", email: "", password: "", rol: "asesor" });
+      setForm({
+        nombre: "",
+        email: "",
+        password: "",
+        rol: "asesor",
+        transportadora_id: "",
+      });
       setCreando(false);
       cargarUsuarios();
     } catch (err) {
-      setMsg({ tipo: "error", texto: "Error: " + err.message });
+      // Si el signUp falla por email ya existente, intentar solo insertar en public.usuarios
+      if (err.message.includes("already registered")) {
+        setMsg({
+          tipo: "error",
+          texto:
+            "Este correo ya tiene una cuenta. El usuario debe iniciar sesión con su contraseña anterior.",
+        });
+      } else {
+        setMsg({ tipo: "error", texto: "Error: " + err.message });
+      }
     }
     setSaving(false);
   }
@@ -112,20 +124,47 @@ export default function Usuarios() {
     );
   }
 
-  async function cambiarContrasena(email) {
-    const nueva = prompt("Nueva contraseña (mínimo 6 caracteres):");
-    if (!nueva || nueva.length < 6) return;
-    const { error } = await supabase.auth.admin?.updateUserById;
-    // Mostrar instrucción SQL
-    setMsg({
-      tipo: "ok",
-      texto: `Para cambiar la contraseña ve a Supabase → Authentication → Users → busca ${email} → "Send password recovery"`,
-    });
+  async function resetPassword(usuario) {
+    const { error } = await supabase.auth.resetPasswordForEmail(usuario.email);
+    if (!error) {
+      setMsg({
+        tipo: "ok",
+        texto: `Email de recuperación enviado a ${usuario.email}`,
+      });
+    } else {
+      setMsg({
+        tipo: "error",
+        texto: "Error al enviar email: " + error.message,
+      });
+    }
   }
 
-  const sqlVinculacion = form.email
-    ? `INSERT INTO public.usuarios (id, email, nombre, rol)\nSELECT id, email, '${form.nombre}', '${form.rol}'\nFROM auth.users WHERE email = '${form.email}';`
-    : "";
+  const ROLES = {
+    admin: {
+      label: "Admin",
+      color: "var(--m)",
+      bg: "var(--m-dim)",
+      border: "var(--m-dim2)",
+    },
+    asesor: {
+      label: "Asesor",
+      color: "var(--gray)",
+      bg: "var(--blk3)",
+      border: "var(--blk5)",
+    },
+    transportador: {
+      label: "Transportador",
+      color: "#AA88FF",
+      bg: "#1a0a2e",
+      border: "#3d1a66",
+    },
+    visualizador: {
+      label: "Visualizador",
+      color: "#55AAFF",
+      bg: "#001a33",
+      border: "#003366",
+    },
+  };
 
   return (
     <div>
@@ -134,10 +173,16 @@ export default function Usuarios() {
         subtitle={`${usuarios.length} usuarios registrados`}
       >
         <Btn
-          variant="primary"
           onClick={() => {
             setCreando(true);
             setMsg(null);
+            setForm({
+              nombre: "",
+              email: "",
+              password: "",
+              rol: "asesor",
+              transportadora_id: "",
+            });
           }}
         >
           + Nuevo usuario
@@ -214,7 +259,7 @@ export default function Usuarios() {
                     marginBottom: "4px",
                   }}
                 >
-                  Nombre completo
+                  Nombre completo *
                 </label>
                 <input
                   value={form.nombre}
@@ -237,7 +282,7 @@ export default function Usuarios() {
                     marginBottom: "4px",
                   }}
                 >
-                  Correo
+                  Correo *
                 </label>
                 <input
                   type="email"
@@ -261,7 +306,7 @@ export default function Usuarios() {
                     marginBottom: "4px",
                   }}
                 >
-                  Contraseña
+                  Contraseña *
                 </label>
                 <input
                   type="password"
@@ -286,67 +331,115 @@ export default function Usuarios() {
                     marginBottom: "4px",
                   }}
                 >
-                  Rol
+                  Rol *
                 </label>
                 <select
                   value={form.rol}
                   onChange={(e) =>
-                    setForm((f) => ({ ...f, rol: e.target.value }))
+                    setForm((f) => ({
+                      ...f,
+                      rol: e.target.value,
+                      transportadora_id: "",
+                    }))
                   }
                   style={{ width: "100%" }}
                 >
                   <option value="asesor">Asesor</option>
                   <option value="admin">Administrador</option>
+                  <option value="transportador">Transportador</option>
+                  <option value="visualizador">Visualizador</option>
                 </select>
               </div>
+
+              {/* Si es transportador, mostrar selector de transportadora */}
+              {form.rol === "transportador" && (
+                <div style={{ gridColumn: "1/-1" }}>
+                  <label
+                    style={{
+                      fontSize: "10px",
+                      color: "var(--gray)",
+                      textTransform: "uppercase",
+                      letterSpacing: ".05em",
+                      display: "block",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Transportadora *
+                  </label>
+                  <select
+                    value={form.transportadora_id}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        transportadora_id: e.target.value,
+                      }))
+                    }
+                    style={{ width: "100%" }}
+                    required
+                  >
+                    <option value="">— Seleccionar transportadora —</option>
+                    {transportadoras.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
-            {/* Instrucciones SQL */}
+            {/* Info según rol */}
             <div
               style={{
                 background: "var(--blk3)",
-                border: "1px solid var(--blk4)",
-                borderRadius: "6px",
+                borderRadius: "7px",
                 padding: "10px 12px",
-                marginBottom: "12px",
+                marginBottom: "14px",
+                fontSize: "11px",
+                color: "var(--gray)",
               }}
             >
-              <div
-                style={{
-                  fontSize: "10px",
-                  color: "var(--gray)",
-                  marginBottom: "6px",
-                  textTransform: "uppercase",
-                  letterSpacing: ".05em",
-                }}
-              >
-                Después de crear, ejecuta esto en Supabase SQL Editor:
-              </div>
-              <pre
-                style={{
-                  fontSize: "11px",
-                  color: "var(--m)",
-                  fontFamily: "var(--font-mono)",
-                  whiteSpace: "pre-wrap",
-                  userSelect: "all",
-                }}
-              >
-                {`INSERT INTO public.usuarios (id, email, nombre, rol)
-SELECT id, email, '${form.nombre || "NOMBRE"}', '${form.rol}'
-FROM auth.users WHERE email = '${form.email || "correo@indurruedas.com"}';`}
-              </pre>
+              {form.rol === "asesor" &&
+                "👤 Puede ver sus guías asignadas y el detalle de cada una."}
+              {form.rol === "admin" &&
+                "⚙️ Acceso completo al sistema — guías, clientes, usuarios y configuración."}
+              {form.rol === "transportador" &&
+                "🚚 Solo ve las guías de su transportadora y puede marcarlas como entregadas."}
+              {form.rol === "visualizador" &&
+                "👁️ Puede ver todas las guías y estadísticas pero no puede modificar nada."}
             </div>
 
             <div style={{ display: "flex", gap: "8px" }}>
-              <Btn variant="primary" disabled={saving}>
-                {saving ? "Creando..." : "Crear en Supabase Auth"}
+              <button
+                type="submit"
+                disabled={saving}
+                style={{
+                  padding: "9px 20px",
+                  background: "var(--m)",
+                  color: "var(--blk)",
+                  border: "none",
+                  borderRadius: "7px",
+                  fontSize: "13px",
+                  fontWeight: "500",
+                  cursor: saving ? "not-allowed" : "pointer",
+                }}
+              >
+                {saving ? "Creando usuario..." : "+ Crear usuario"}
+              </button>
+              <Btn
+                onClick={() => {
+                  setCreando(false);
+                  setMsg(null);
+                }}
+              >
+                Cancelar
               </Btn>
-              <Btn onClick={() => setCreando(false)}>Cancelar</Btn>
             </div>
           </form>
         </div>
       )}
 
+      {/* Lista de usuarios */}
       {loading ? (
         <div
           style={{
@@ -377,68 +470,90 @@ FROM auth.users WHERE email = '${form.email || "correo@indurruedas.com"}';`}
               </tr>
             </thead>
             <tbody>
-              {usuarios.map((u) => (
-                <tr
-                  key={u.id}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.background = "var(--hover-bg)")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.background = "transparent")
-                  }
-                >
-                  <Td style={{ color: "var(--wht)", fontWeight: "500" }}>
-                    {u.nombre}
-                  </Td>
-                  <Td style={{ color: "var(--gray)", fontSize: "12px" }}>
-                    {u.email}
-                  </Td>
-                  <Td>
-                    <span
-                      style={{
-                        fontSize: "10px",
-                        padding: "2px 8px",
-                        borderRadius: "20px",
-                        fontWeight: "500",
-                        background:
-                          u.rol === "admin" ? "var(--m-dim)" : "var(--blk3)",
-                        color: u.rol === "admin" ? "var(--m)" : "var(--gray)",
-                        border: `1px solid ${u.rol === "admin" ? "var(--m-dim2)" : "var(--blk5)"}`,
-                      }}
-                    >
-                      {u.rol === "admin" ? "Admin" : "Asesor"}
-                    </span>
-                  </Td>
-                  <Td>
-                    <span
-                      style={{
-                        fontSize: "10px",
-                        color: u.activo ? "var(--m)" : "var(--danger)",
-                      }}
-                    >
-                      {u.activo ? "● Activo" : "● Inactivo"}
-                    </span>
-                  </Td>
-                  <Td>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <button
-                        onClick={() => toggleActivo(u)}
+              {usuarios.map((u) => {
+                const rol = ROLES[u.rol] || ROLES.asesor;
+                return (
+                  <tr
+                    key={u.id}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.background = "var(--hover-bg)")
+                    }
+                    onMouseLeave={(e) =>
+                      (e.currentTarget.style.background = "transparent")
+                    }
+                  >
+                    <Td style={{ color: "var(--wht)", fontWeight: "500" }}>
+                      {u.nombre}
+                    </Td>
+                    <Td style={{ color: "var(--gray)", fontSize: "12px" }}>
+                      {u.email}
+                    </Td>
+                    <Td>
+                      <span
                         style={{
                           fontSize: "10px",
-                          padding: "3px 8px",
-                          border: `1px solid ${u.activo ? "#440000" : "#1a3300"}`,
-                          borderRadius: "4px",
-                          background: "transparent",
-                          color: u.activo ? "var(--danger)" : "var(--m)",
-                          cursor: "pointer",
+                          padding: "2px 8px",
+                          borderRadius: "20px",
+                          fontWeight: "500",
+                          background: rol.bg,
+                          color: rol.color,
+                          border: `1px solid ${rol.border}`,
                         }}
                       >
-                        {u.activo ? "Desactivar" : "Activar"}
-                      </button>
-                    </div>
-                  </Td>
-                </tr>
-              ))}
+                        {rol.label}
+                      </span>
+                    </Td>
+                    <Td>
+                      <span
+                        style={{
+                          fontSize: "10px",
+                          color: u.activo ? "var(--m)" : "var(--danger)",
+                        }}
+                      >
+                        {u.activo ? "● Activo" : "● Inactivo"}
+                      </span>
+                    </Td>
+                    <Td>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "6px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <button
+                          onClick={() => toggleActivo(u)}
+                          style={{
+                            fontSize: "10px",
+                            padding: "3px 8px",
+                            border: `1px solid ${u.activo ? "#440000" : "#1a3300"}`,
+                            borderRadius: "4px",
+                            background: "transparent",
+                            color: u.activo ? "var(--danger)" : "var(--m)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {u.activo ? "Desactivar" : "Activar"}
+                        </button>
+                        <button
+                          onClick={() => resetPassword(u)}
+                          style={{
+                            fontSize: "10px",
+                            padding: "3px 8px",
+                            border: "1px solid var(--blk5)",
+                            borderRadius: "4px",
+                            background: "transparent",
+                            color: "var(--gray)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Reset contraseña
+                        </button>
+                      </div>
+                    </Td>
+                  </tr>
+                );
+              })}
             </tbody>
           </Table>
         </div>
