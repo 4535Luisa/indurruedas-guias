@@ -29,10 +29,34 @@ function esFBC(factura) {
   return f.includes("FBC") && !f.includes("FBG");
 }
 
+// Extrae facturas del campo ANEXOS de Estelar
+// Maneja casos como:
+// - "FBG-46156" → "FBG-46156"
+// - "FBG-46176-46175" → "FBG-46176, FBG-46175" (dos facturas pegadas)
+// - "FBG-46163 FBG-46164" → "FBG-46163, FBG-46164"
 function extraerFacturaEstelar(anexos) {
   if (!anexos) return null;
-  const match = String(anexos).match(/FB[GC]-?\s*\d+/gi);
-  return match ? match.map((m) => m.replace(/\s/g, "")).join(", ") : null;
+  const texto = String(anexos);
+  const facturas = [];
+
+  // Buscar todos los patrones FB[GC]-NNNNN en el texto
+  // Primero reemplazar patrones dobles: FBG-NNNNN-NNNNN → FBG-NNNNN FBG-NNNNN
+  const textoExpandido = texto.replace(
+    /FB([GC])-(\d{4,})-(\d{4,})/gi,
+    (_, tipo, num1, num2) => `FB${tipo}-${num1} FB${tipo}-${num2}`,
+  );
+
+  // Ahora extraer todos los FB[GC]-NNNNN
+  const matches = textoExpandido.match(/FB[GC]-\d+/gi);
+  if (!matches) return null;
+
+  // Limpiar y deduplicar
+  for (const m of matches) {
+    const limpio = m.replace(/\s/g, "").toUpperCase();
+    if (!facturas.includes(limpio)) facturas.push(limpio);
+  }
+
+  return facturas.length > 0 ? facturas.join(", ") : null;
 }
 
 function parsearFechaEstelar(str) {
@@ -275,7 +299,6 @@ export default function Guias() {
     setLoading(false);
   }
 
-  // Busca cliente por NIT primero, luego nombre completo exacto, luego parcial
   async function buscarClienteConCache(nit, nombre) {
     const nitLimpio =
       nit && nit !== "nan" && String(nit).trim().length > 3
@@ -324,7 +347,6 @@ export default function Guias() {
     return null;
   }
 
-  // Si es FBC: asigna Simon al cliente existente, o crea uno nuevo y lo asigna
   async function gestionarClienteFBC(
     factura,
     clienteId,
@@ -335,7 +357,6 @@ export default function Guias() {
     if (!esFBC(factura)) return clienteId;
 
     if (clienteId) {
-      // Cliente existe — asignar Simon
       await supabase
         .from("clientes")
         .update({ asesor_id: SIMON_ID })
@@ -343,7 +364,6 @@ export default function Guias() {
       return clienteId;
     }
 
-    // Cliente no existe — crear y asignar Simon
     const nombre = destinatario || "CLIENTE FBC";
     const nitCliente =
       nit && nit !== "nan" && String(nit).trim().length > 3
@@ -354,23 +374,19 @@ export default function Guias() {
       .from("clientes")
       .insert({
         nit: nitCliente,
-        nombre: nombre,
+        nombre,
         asesor_id: SIMON_ID,
       })
       .select("id")
       .single();
 
     if (nuevoCliente) {
-      // Guardar en caché para no crear duplicados en la misma carga
       if (nit) clienteCache.current[`nit:${nit}`] = nuevoCliente.id;
       clienteCache.current[`nombre:${nombre}`] = nuevoCliente.id;
-
-      // Crear sede si hay ciudad
-      if (ciudad) {
+      if (ciudad)
         await supabase
           .from("sedes")
           .insert({ cliente_id: nuevoCliente.id, ciudad, principal: true });
-      }
       return nuevoCliente.id;
     }
     return null;
@@ -439,7 +455,6 @@ export default function Guias() {
         const direccion = String(row["DIRECCION DESTINO"] || "").trim();
 
         let clienteId = await buscarClienteConCache(nit, destinatario);
-        // Gestionar FBC: asignar/crear cliente para Simon
         clienteId = await gestionarClienteFBC(
           factura,
           clienteId,
@@ -604,7 +619,6 @@ export default function Guias() {
             : null;
 
         let clienteId = await buscarClienteConCache(null, destinatario);
-        // Gestionar FBC: asignar/crear cliente para Simon
         clienteId = await gestionarClienteFBC(
           factura,
           clienteId,
