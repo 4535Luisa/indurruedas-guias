@@ -8,6 +8,37 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).toString();
 
+// Palabras que por sí solas son ambiguas
+const PALABRAS_AMBIGUAS = [
+  "distribuidora",
+  "ferreteria",
+  "comercializadora",
+  "inversiones",
+  "agroveterinaria",
+  "suministros",
+  "industria",
+  "importadora",
+  "representaciones",
+  "construcciones",
+  "servicios",
+  "grupo",
+  "ferroplas",
+  "plasticos",
+  "agricolas",
+  "herramientas",
+];
+
+function esNombreAmbiguo(nombre) {
+  if (!nombre) return false;
+  const lower = nombre.toLowerCase().trim();
+  // Si el nombre tiene menos de 3 palabras significativas Y empieza con palabra ambigua
+  const palabras = lower.split(" ").filter((p) => p.length > 2);
+  if (palabras.length <= 2) {
+    return PALABRAS_AMBIGUAS.some((p) => lower.startsWith(p));
+  }
+  return false;
+}
+
 function parsearFecha(str) {
   if (!str) return null;
   const match = str.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
@@ -126,6 +157,178 @@ function parsearPlanilla(texto) {
   return resultado;
 }
 
+// Mini buscador de cliente para asignación manual
+function BuscadorCliente({ guia, onAsignar, onCerrar }) {
+  const [busqueda, setBusqueda] = useState(guia.cliente || "");
+  const [opciones, setOpciones] = useState([]);
+  const [buscando, setBuscando] = useState(false);
+
+  useEffect(() => {
+    if (busqueda.trim().length > 2) buscarClientes();
+  }, [busqueda]);
+
+  async function buscarClientes() {
+    setBuscando(true);
+    const { data } = await supabase
+      .from("clientes")
+      .select("id, nombre, nit, usuarios(nombre)")
+      .ilike("nombre", `%${busqueda.trim()}%`)
+      .limit(10);
+    setOpciones(data || []);
+    setBuscando(false);
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 2000,
+        background: "rgba(0,0,0,0.75)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px",
+      }}
+      onClick={onCerrar}
+    >
+      <div
+        style={{
+          background: "var(--blk2)",
+          border: "1px solid var(--blk4)",
+          borderRadius: "12px",
+          width: "100%",
+          maxWidth: "480px",
+          padding: "20px",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          style={{
+            fontSize: "13px",
+            fontWeight: "500",
+            color: "var(--wht)",
+            marginBottom: "4px",
+          }}
+        >
+          Asignar cliente
+        </div>
+        <div
+          style={{
+            fontSize: "11px",
+            color: "var(--gray)",
+            marginBottom: "14px",
+          }}
+        >
+          Factura{" "}
+          <span style={{ color: "var(--m)", fontFamily: "var(--font-mono)" }}>
+            {guia.factura}
+          </span>{" "}
+          · {guia.numero_guia} · Nombre en planilla: <em>{guia.cliente}</em>
+        </div>
+
+        <input
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          placeholder="Buscar cliente por nombre..."
+          autoFocus
+          style={{ width: "100%", marginBottom: "10px" }}
+        />
+
+        {buscando && (
+          <div
+            style={{
+              fontSize: "11px",
+              color: "var(--gray)",
+              marginBottom: "8px",
+            }}
+          >
+            Buscando...
+          </div>
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px",
+            maxHeight: "250px",
+            overflowY: "auto",
+          }}
+        >
+          {opciones.map((c) => (
+            <div
+              key={c.id}
+              onClick={() => onAsignar(c)}
+              style={{
+                padding: "10px 12px",
+                borderRadius: "7px",
+                border: "1px solid var(--blk4)",
+                cursor: "pointer",
+                background: "var(--blk3)",
+              }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.borderColor = "var(--m)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.borderColor = "var(--blk4)")
+              }
+            >
+              <div
+                style={{
+                  fontSize: "12px",
+                  color: "var(--wht)",
+                  fontWeight: "500",
+                }}
+              >
+                {c.nombre}
+              </div>
+              <div
+                style={{
+                  fontSize: "10px",
+                  color: "var(--gray)",
+                  marginTop: "2px",
+                }}
+              >
+                NIT: {c.nit || "—"} · Asesor: {c.usuarios?.nombre || "—"}
+              </div>
+            </div>
+          ))}
+          {!buscando && opciones.length === 0 && busqueda.length > 2 && (
+            <div
+              style={{
+                fontSize: "11px",
+                color: "var(--gray)",
+                padding: "12px",
+                textAlign: "center",
+              }}
+            >
+              No se encontraron clientes con ese nombre
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={onCerrar}
+          style={{
+            marginTop: "12px",
+            width: "100%",
+            padding: "8px",
+            background: "transparent",
+            border: "1px solid var(--blk5)",
+            borderRadius: "7px",
+            color: "var(--gray)",
+            fontSize: "12px",
+            cursor: "pointer",
+          }}
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function SubirPlanilla() {
   const [transportadoras, setTransportadoras] = useState([]);
   const [archivo, setArchivo] = useState(null);
@@ -135,8 +338,9 @@ export default function SubirPlanilla() {
   const [editando, setEditando] = useState([]);
   const [guardando, setGuardando] = useState(false);
   const [resultado, setResultado] = useState(null);
-  // guías ya existentes con transportadora diferente
   const [conflictos, setConflictos] = useState([]);
+  const [guiasSinCliente, setGuiasSinCliente] = useState([]); // guías creadas que necesitan asignación
+  const [asignandoGuia, setAsignandoGuia] = useState(null); // guía abierta en el buscador
   const fileRef = useRef();
 
   useEffect(() => {
@@ -160,6 +364,7 @@ export default function SubirPlanilla() {
     setPlanilla(null);
     setResultado(null);
     setConflictos([]);
+    setGuiasSinCliente([]);
 
     try {
       const texto = await extraerTextoPDF(file);
@@ -179,7 +384,6 @@ export default function SubirPlanilla() {
     setProcesando(false);
   }
 
-  // Verificar conflictos antes de guardar
   async function verificarYGuardar() {
     if (!transportadoraId) {
       alert("Selecciona la transportadora");
@@ -188,8 +392,6 @@ export default function SubirPlanilla() {
 
     const trans = transportadoras.find((t) => t.id === transportadoraId);
     const guiasAGuardar = editando.filter((g) => g.incluir && g.factura);
-
-    // Generar números de guía
     const planillaCorta = (planilla.numero_planilla || "RTF-0").replace(
       /RTF-0+(\d+)/i,
       "RTF-$1",
@@ -198,7 +400,6 @@ export default function SubirPlanilla() {
       (_, i) => `${planillaCorta}-${i + 1}`,
     );
 
-    // Buscar existentes
     const { data: existentes } = await supabase
       .from("guias")
       .select(
@@ -211,7 +412,6 @@ export default function SubirPlanilla() {
       existentesMap[g.numero_guia] = g;
     });
 
-    // Detectar conflictos de transportadora
     const nuevosConflictos = [];
     guiasAGuardar.forEach((g, i) => {
       const numGuia = `${planillaCorta}-${i + 1}`;
@@ -230,7 +430,7 @@ export default function SubirPlanilla() {
 
     if (nuevosConflictos.length > 0) {
       setConflictos(nuevosConflictos);
-      return; // Mostrar conflictos antes de guardar
+      return;
     }
 
     await guardarGuias(existentesMap, planillaCorta, trans, guiasAGuardar);
@@ -249,6 +449,7 @@ export default function SubirPlanilla() {
       actualizadas = 0,
       duplicadas = 0,
       errores = 0;
+    const sinCliente = [];
 
     for (let i = 0; i < guiasAGuardar.length; i++) {
       const g = guiasAGuardar[i];
@@ -256,7 +457,6 @@ export default function SubirPlanilla() {
       const existente = existentesMap?.[numeroGuia];
 
       if (existente) {
-        // Ya existe — actualizar transportadora si se pidió corregir
         const conflicto = conflictos.find((c) => c.numero_guia === numeroGuia);
         if (conflicto?.corregir) {
           await supabase
@@ -275,8 +475,10 @@ export default function SubirPlanilla() {
         continue;
       }
 
-      // Buscar cliente
+      // Buscar cliente — exacto primero, luego parcial
       let clienteId = null;
+      let clienteAmbiguo = false;
+
       if (g.cliente?.trim().length > 2) {
         const nombreLimpio = g.cliente.trim();
         const { data: exacto } = await supabase
@@ -287,34 +489,58 @@ export default function SubirPlanilla() {
         if (exacto?.[0]) {
           clienteId = exacto[0].id;
         } else {
-          const { data: parcial } = await supabase
+          // Buscar parcial — verificar si hay múltiples coincidencias
+          const { data: parciales } = await supabase
             .from("clientes")
-            .select("id")
+            .select("id, nombre")
             .ilike("nombre", `%${nombreLimpio}%`)
-            .limit(1);
-          if (parcial?.[0]) clienteId = parcial[0].id;
+            .limit(5);
+          if (parciales?.length === 1) {
+            clienteId = parciales[0].id;
+          } else if (parciales?.length > 1 || esNombreAmbiguo(nombreLimpio)) {
+            // Múltiples coincidencias o nombre genérico → marcar como ambiguo
+            clienteAmbiguo = true;
+            clienteId = null;
+          }
         }
       }
 
-      const { error } = await supabase.from("guias").insert({
-        numero_guia: numeroGuia,
-        transportadora: "otra",
-        transportadora_nombre: trans.nombre,
-        transportadora_id: transportadoraId,
-        factura_indurruedas: g.factura,
-        estado: "en_transito",
-        cliente_id: clienteId,
-        destinatario: g.cliente,
-        ciudad_destino: g.ciudad,
-        direccion_entrega: g.direccion,
-        fecha_guia: planilla.fecha_planilla,
-        fecha_planilla: planilla.fecha_planilla,
-        numero_planilla: planilla.numero_planilla,
-        activa: true,
-      });
+      const { data: guiaCreada, error } = await supabase
+        .from("guias")
+        .insert({
+          numero_guia: numeroGuia,
+          transportadora: "otra",
+          transportadora_nombre: trans.nombre,
+          transportadora_id: transportadoraId,
+          factura_indurruedas: g.factura,
+          estado: "en_transito",
+          cliente_id: clienteId,
+          destinatario: g.cliente,
+          ciudad_destino: g.ciudad,
+          direccion_entrega: g.direccion,
+          fecha_guia: planilla.fecha_planilla,
+          fecha_planilla: planilla.fecha_planilla,
+          numero_planilla: planilla.numero_planilla,
+          activa: true,
+        })
+        .select("id")
+        .single();
 
-      if (!error) nuevas++;
-      else errores++;
+      if (!error) {
+        nuevas++;
+        // Si no se asignó cliente o fue ambiguo, agregar al panel de revisión
+        if (!clienteId || clienteAmbiguo) {
+          sinCliente.push({
+            id: guiaCreada.id,
+            numero_guia: numeroGuia,
+            factura: g.factura,
+            cliente: g.cliente,
+            ciudad: g.ciudad,
+            ambiguo: clienteAmbiguo,
+            asignado: false,
+          });
+        }
+      } else errores++;
     }
 
     await supabase.from("sync_log").insert({
@@ -329,6 +555,7 @@ export default function SubirPlanilla() {
     });
 
     setResultado({ nuevas, actualizadas, duplicadas, errores });
+    setGuiasSinCliente(sinCliente);
     setGuardando(false);
   }
 
@@ -352,6 +579,24 @@ export default function SubirPlanilla() {
     });
     await guardarGuias(existentesMap, planillaCorta, trans, guiasAGuardar);
   }
+
+  async function asignarCliente(cliente) {
+    if (!asignandoGuia) return;
+    await supabase
+      .from("guias")
+      .update({ cliente_id: cliente.id })
+      .eq("id", asignandoGuia.id);
+    setGuiasSinCliente((prev) =>
+      prev.map((g) =>
+        g.id === asignandoGuia.id
+          ? { ...g, asignado: true, clienteAsignado: cliente.nombre }
+          : g,
+      ),
+    );
+    setAsignandoGuia(null);
+  }
+
+  const pendientesSinAsignar = guiasSinCliente.filter((g) => !g.asignado);
 
   return (
     <div>
@@ -581,7 +826,149 @@ export default function SubirPlanilla() {
         </div>
       )}
 
-      {/* Panel de conflictos de transportadora */}
+      {/* Panel clientes sin asignar / ambiguos */}
+      {guiasSinCliente.length > 0 && (
+        <div
+          style={{
+            background: "#1a1000",
+            border: "1px solid var(--warn)",
+            borderRadius: "10px",
+            padding: "16px",
+            marginBottom: "16px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "12px",
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: "13px",
+                  fontWeight: "500",
+                  color: "var(--warn)",
+                }}
+              >
+                ⚠️ {pendientesSinAsignar.length} guía
+                {pendientesSinAsignar.length !== 1 ? "s" : ""} sin cliente
+                asignado
+              </div>
+              <div
+                style={{
+                  fontSize: "11px",
+                  color: "var(--gray)",
+                  marginTop: "2px",
+                }}
+              >
+                El nombre en la planilla es ambiguo o no coincide exactamente
+                con ningún cliente
+              </div>
+            </div>
+            {pendientesSinAsignar.length === 0 && (
+              <span
+                style={{
+                  fontSize: "12px",
+                  color: "var(--m)",
+                  fontWeight: "500",
+                }}
+              >
+                ✓ Todos asignados
+              </span>
+            )}
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            {guiasSinCliente.map((g) => (
+              <div
+                key={g.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "9px 12px",
+                  background: g.asignado
+                    ? "rgba(170,255,0,0.05)"
+                    : "rgba(255,170,0,0.07)",
+                  borderRadius: "7px",
+                  border: `1px solid ${g.asignado ? "rgba(170,255,0,0.2)" : "rgba(255,170,0,0.2)"}`,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "11px",
+                    color: "var(--m)",
+                    minWidth: "90px",
+                  }}
+                >
+                  {g.numero_guia}
+                </span>
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "11px",
+                    color: "var(--gray)",
+                  }}
+                >
+                  {g.factura}
+                </span>
+                <span
+                  style={{ fontSize: "11px", color: "var(--wht2)", flex: 1 }}
+                >
+                  {g.asignado ? (
+                    <span style={{ color: "var(--m)" }}>
+                      ✓ {g.clienteAsignado}
+                    </span>
+                  ) : (
+                    <>
+                      <em style={{ color: "var(--warn)" }}>{g.cliente}</em>
+                      {g.ambiguo && (
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            color: "var(--gray)",
+                            marginLeft: "6px",
+                          }}
+                        >
+                          (nombre ambiguo)
+                        </span>
+                      )}
+                    </>
+                  )}
+                </span>
+                <span style={{ fontSize: "11px", color: "var(--gray)" }}>
+                  {g.ciudad}
+                </span>
+                {!g.asignado && (
+                  <button
+                    onClick={() => setAsignandoGuia(g)}
+                    style={{
+                      fontSize: "11px",
+                      padding: "4px 12px",
+                      background: "var(--warn)",
+                      color: "var(--blk)",
+                      border: "none",
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      fontWeight: "500",
+                      flexShrink: 0,
+                    }}
+                  >
+                    Asignar cliente
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Panel conflictos transportadora */}
       {conflictos.length > 0 && (
         <div
           style={{
@@ -707,7 +1094,7 @@ export default function SubirPlanilla() {
         </div>
       )}
 
-      {/* Tabla de guías detectadas */}
+      {/* Tabla guías detectadas */}
       {editando.length > 0 && (
         <div
           style={{
@@ -847,7 +1234,9 @@ export default function SubirPlanilla() {
                       style={{
                         padding: "7px 12px",
                         borderBottom: "1px solid var(--blk3)",
-                        color: "var(--wht2)",
+                        color: esNombreAmbiguo(g.cliente)
+                          ? "var(--warn)"
+                          : "var(--wht2)",
                       }}
                     >
                       <input
@@ -862,11 +1251,22 @@ export default function SubirPlanilla() {
                         style={{
                           background: "transparent",
                           border: "none",
-                          color: "var(--wht2)",
+                          color: "inherit",
                           fontSize: "12px",
                           width: "200px",
                         }}
                       />
+                      {esNombreAmbiguo(g.cliente) && (
+                        <span
+                          style={{
+                            fontSize: "9px",
+                            color: "var(--warn)",
+                            marginLeft: "4px",
+                          }}
+                        >
+                          ⚠️
+                        </span>
+                      )}
                     </td>
                     <td
                       style={{
@@ -924,6 +1324,15 @@ export default function SubirPlanilla() {
             </table>
           </div>
         </div>
+      )}
+
+      {/* Modal buscador de cliente */}
+      {asignandoGuia && (
+        <BuscadorCliente
+          guia={asignandoGuia}
+          onAsignar={asignarCliente}
+          onCerrar={() => setAsignandoGuia(null)}
+        />
       )}
     </div>
   );
