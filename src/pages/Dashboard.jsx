@@ -13,7 +13,6 @@ import {
   startOfWeek,
   startOfMonth,
   subMonths,
-  isWithinInterval,
 } from "date-fns";
 import { es } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
@@ -28,7 +27,6 @@ const COLORES = [
   "#FF88CC",
 ];
 
-// ─── Filtros de fecha ────────────────────────────────────────────────────────
 const PERIODOS = [
   { id: "todo", label: "Todo" },
   { id: "hoy", label: "Hoy" },
@@ -63,13 +61,10 @@ function getRango(periodo, customDesde, customHasta) {
       hasta: h.toISOString().split("T")[0],
     };
   }
-  if (periodo === "custom") {
-    return { desde: customDesde, hasta: customHasta };
-  }
-  return null; // "todo"
+  if (periodo === "custom") return { desde: customDesde, hasta: customHasta };
+  return null;
 }
 
-// ─── Barra horizontal mini ───────────────────────────────────────────────────
 function Barra({ pct, color = "var(--m)", height = 5 }) {
   return (
     <div
@@ -94,7 +89,6 @@ function Barra({ pct, color = "var(--m)", height = 5 }) {
   );
 }
 
-// ─── Chip selector de período ────────────────────────────────────────────────
 function PeriodoChips({ value, onChange }) {
   return (
     <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
@@ -122,7 +116,6 @@ function PeriodoChips({ value, onChange }) {
   );
 }
 
-// ─── Donut chart SVG ─────────────────────────────────────────────────────────
 function DonutChart({ data, size = 160, stroke = 32, label, sublabel }) {
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
@@ -238,7 +231,6 @@ function DonutChart({ data, size = 160, stroke = 32, label, sublabel }) {
   );
 }
 
-// ─── Line chart SVG ──────────────────────────────────────────────────────────
 function LineChartGuias({ data }) {
   if (!data || data.length === 0)
     return (
@@ -253,31 +245,22 @@ function LineChartGuias({ data }) {
     PR = 12,
     PT = 12,
     PB = 32;
-  const cW = W - PL - PR;
-  const cH = H - PT - PB;
-
+  const cW = W - PL - PR,
+    cH = H - PT - PB;
   const maxVal = Math.max(
     ...data.map((d) => Math.max(d.nuevas, d.entregadas)),
     1,
   );
   const xStep = data.length > 1 ? cW / (data.length - 1) : cW;
-
   const toX = (i) => PL + (data.length > 1 ? i * xStep : cW / 2);
   const toY = (v) => PT + cH - (v / maxVal) * cH;
-
   const pathNuevas = data
     .map((d, i) => `${i === 0 ? "M" : "L"}${toX(i)},${toY(d.nuevas)}`)
     .join(" ");
   const pathEntregadas = data
     .map((d, i) => `${i === 0 ? "M" : "L"}${toX(i)},${toY(d.entregadas)}`)
     .join(" ");
-
-  // area fills
   const areaBase = `L${toX(data.length - 1)},${PT + cH} L${PL},${PT + cH} Z`;
-  const areaNuevas = pathNuevas + " " + areaBase;
-  const areaEntregadas = pathEntregadas + " " + areaBase;
-
-  // pick every Nth label to avoid crowding
   const step = Math.max(1, Math.ceil(data.length / 8));
   const tickIndices = data
     .map((_, i) => i)
@@ -298,8 +281,6 @@ function LineChartGuias({ data }) {
           <stop offset="100%" stopColor="#AAFF00" stopOpacity="0" />
         </linearGradient>
       </defs>
-
-      {/* Y grid lines */}
       {[0, 0.25, 0.5, 0.75, 1].map((t) => {
         const y = PT + cH - t * cH;
         return (
@@ -324,12 +305,8 @@ function LineChartGuias({ data }) {
           </g>
         );
       })}
-
-      {/* Areas */}
-      <path d={areaNuevas} fill="url(#gradNuevas)" />
-      <path d={areaEntregadas} fill="url(#gradEnt)" />
-
-      {/* Lines */}
+      <path d={pathNuevas + " " + areaBase} fill="url(#gradNuevas)" />
+      <path d={pathEntregadas + " " + areaBase} fill="url(#gradEnt)" />
       <path
         d={pathNuevas}
         fill="none"
@@ -344,16 +321,12 @@ function LineChartGuias({ data }) {
         strokeWidth="2"
         strokeLinejoin="round"
       />
-
-      {/* Dots on hover would need JS; add static dots */}
       {data.map((d, i) => (
         <g key={i}>
           <circle cx={toX(i)} cy={toY(d.nuevas)} r="3" fill="#55AAFF" />
           <circle cx={toX(i)} cy={toY(d.entregadas)} r="3" fill="#AAFF00" />
         </g>
       ))}
-
-      {/* X axis labels */}
       {tickIndices.map((i) => (
         <text
           key={i}
@@ -372,13 +345,9 @@ function LineChartGuias({ data }) {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-
-  // Filtro período
   const [periodo, setPeriodo] = useState("todo");
   const [customDesde, setCustomDesde] = useState("");
   const [customHasta, setCustomHasta] = useState("");
-
-  // Data cruda
   const [todasGuias, setTodasGuias] = useState([]);
   const [porAsesor, setPorAsesor] = useState([]);
   const [ultimasGuias, setUltimasGuias] = useState([]);
@@ -389,8 +358,6 @@ export default function Dashboard() {
   });
   const [guiasCriticas, setGuiasCriticas] = useState([]);
   const [loading, setLoading] = useState(true);
-
-  // Tabla recientes
   const [buscar, setBuscar] = useState("");
   const [pagina, setPagina] = useState(0);
   const POR_PAG = 10;
@@ -402,9 +369,6 @@ export default function Dashboard() {
   async function cargarDatos() {
     setLoading(true);
     const hace6Dias = new Date(Date.now() - 6 * 86400000)
-      .toISOString()
-      .split("T")[0];
-    const hace6Meses = new Date(Date.now() - 180 * 86400000)
       .toISOString()
       .split("T")[0];
 
@@ -429,14 +393,14 @@ export default function Dashboard() {
           .lt("fecha_guia", hace6Dias)
           .order("fecha_guia", { ascending: true })
           .limit(50),
+        // TODAS las guías sin límite de fecha
         supabase
           .from("guias")
           .select(
             "numero_guia, transportadora, transportadora_nombre, estado, fecha_guia, ciudad_destino, activa, dias_habiles, clientes(nombre, usuarios(nombre))",
           )
-          .gte("fecha_guia", hace6Meses)
           .not("fecha_guia", "is", null)
-          .limit(5000),
+          .limit(10000),
         supabase
           .from("guias")
           .select(
@@ -463,7 +427,6 @@ export default function Dashboard() {
     setLoading(false);
   }
 
-  // ── Datos filtrados por período ───────────────────────────────────────────
   const rango = getRango(periodo, customDesde, customHasta);
 
   const guiasFiltradas = useMemo(() => {
@@ -474,7 +437,6 @@ export default function Dashboard() {
     });
   }, [todasGuias, rango]);
 
-  // ── KPIs derivados ────────────────────────────────────────────────────────
   const kpis = useMemo(() => {
     const activas = guiasFiltradas.filter(
       (g) => g.activa && g.estado !== "entregado" && g.estado !== "anulada",
@@ -538,7 +500,6 @@ export default function Dashboard() {
     };
   }, [guiasFiltradas, guiasCriticas, periodo]);
 
-  // ── Gráficas ──────────────────────────────────────────────────────────────
   const porEstado = useMemo(() => {
     const m = {};
     guiasFiltradas.forEach((g) => {
@@ -605,7 +566,6 @@ export default function Dashboard() {
     return { meses: mesesOrdenados, transportadoras, datos: meses };
   }, [guiasFiltradas]);
 
-  // ── Guías nuevas vs entregadas por día ───────────────────────────────────
   const nuevasVsEntregadasPorDia = useMemo(() => {
     const dias = {};
     guiasFiltradas.forEach((g) => {
@@ -620,7 +580,6 @@ export default function Dashboard() {
       .map(([dia, v]) => ({ dia, ...v }));
   }, [guiasFiltradas]);
 
-  // ── Donut transportadoras (todas las guías filtradas) ─────────────────────
   const donutTransportadoras = useMemo(() => {
     const m = {};
     guiasFiltradas.forEach((g) => {
@@ -652,7 +611,6 @@ export default function Dashboard() {
       }));
   }, [guiasFiltradas]);
 
-  // ── Donut entregadas vs no entregadas ─────────────────────────────────────
   const donutEntregadas = useMemo(() => {
     const entregadas = guiasFiltradas.filter(
       (g) => g.estado === "entregado",
@@ -686,7 +644,6 @@ export default function Dashboard() {
     ].filter((d) => d.count > 0);
   }, [guiasFiltradas]);
 
-  // ── Tabla mejorada (recientes) ────────────────────────────────────────────
   const tablaFiltrada = useMemo(() => {
     const q = buscar.toLowerCase();
     return ultimasGuias.filter(
@@ -705,7 +662,6 @@ export default function Dashboard() {
     pagina * POR_PAG,
     (pagina + 1) * POR_PAG,
   );
-
   const maxAsesor = porAsesor[0]?.total || 1;
   const maxTiempo = Math.max(...tiemposTrans.map((t) => t.promedio), 1);
   const maxEstado = porEstado[0]?.[1] || 1;
@@ -725,7 +681,6 @@ export default function Dashboard() {
 
   return (
     <div>
-      {/* ── Header con filtros ── */}
       <PageHeader title="Dashboard" subtitle="Resumen de guías y envíos">
         <PeriodoChips
           value={periodo}
@@ -736,7 +691,6 @@ export default function Dashboard() {
         />
       </PageHeader>
 
-      {/* Rango personalizado */}
       {periodo === "custom" && (
         <div
           style={{
@@ -778,7 +732,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── Banner críticas ── */}
+      {/* Banner críticas */}
       {guiasCriticas.length > 0 && (
         <div
           style={{
@@ -909,7 +863,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── KPIs fila 1 ── */}
+      {/* KPIs fila 1 */}
       <div
         style={{
           display: "grid",
@@ -944,7 +898,7 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* ── KPIs fila 2 ── */}
+      {/* KPIs fila 2 */}
       <div
         style={{
           display: "grid",
@@ -953,7 +907,6 @@ export default function Dashboard() {
           marginBottom: 20,
         }}
       >
-        {/* Tasa de entrega */}
         <div
           style={{
             background: "var(--blk2)",
@@ -1007,7 +960,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Tiempo promedio */}
         <div
           style={{
             background: "var(--blk2)",
@@ -1032,15 +984,15 @@ export default function Dashboard() {
               fontSize: 26,
               fontWeight: 500,
               fontFamily: "var(--font-mono)",
-              color:
-                typeof kpis.promDias === "number"
-                  ? kpis.promDias <= 3
-                    ? "var(--m)"
-                    : kpis.promDias <= 6
-                      ? "var(--warn)"
-                      : "var(--danger)"
-                  : "var(--wht)",
               lineHeight: 1,
+              color:
+                typeof kpis.promDias === "string"
+                  ? "var(--wht)"
+                  : +kpis.promDias <= 3
+                    ? "var(--m)"
+                    : +kpis.promDias <= 6
+                      ? "var(--warn)"
+                      : "var(--danger)",
             }}
           >
             {kpis.promDias}
@@ -1051,7 +1003,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Estelar */}
         <div
           style={{
             background: "var(--blk2)",
@@ -1079,7 +1030,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* TCC */}
         <div
           style={{
             background: "var(--blk2)",
@@ -1108,7 +1058,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Guías nuevas vs entregadas por día ── */}
+      {/* Línea nuevas vs entregadas */}
       <div
         style={{
           background: "var(--blk2)",
@@ -1157,12 +1107,12 @@ export default function Dashboard() {
           </div>
         </div>
         <div style={{ fontSize: 10, color: "var(--gray)", marginBottom: 16 }}>
-          {rango ? `${rango.desde} → ${rango.hasta}` : "Últimos 6 meses"}
+          {rango ? `${rango.desde} → ${rango.hasta}` : "Histórico completo"}
         </div>
         <LineChartGuias data={nuevasVsEntregadasPorDia} />
       </div>
 
-      {/* ── Donuts: transportadoras + entregadas/no entregadas ── */}
+      {/* Donuts */}
       <div
         style={{
           display: "grid",
@@ -1171,7 +1121,6 @@ export default function Dashboard() {
           marginBottom: 16,
         }}
       >
-        {/* Donut transportadoras */}
         <div
           style={{
             background: "var(--blk2)",
@@ -1197,8 +1146,6 @@ export default function Dashboard() {
             sublabel="guías"
           />
         </div>
-
-        {/* Donut entregadas vs no */}
         <div
           style={{
             background: "var(--blk2)",
@@ -1226,7 +1173,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Asesor + Estado ── */}
+      {/* Asesor + Estado */}
       <div
         style={{
           display: "grid",
@@ -1235,7 +1182,6 @@ export default function Dashboard() {
           marginBottom: 16,
         }}
       >
-        {/* Por asesor */}
         <div
           style={{
             background: "var(--blk2)",
@@ -1293,8 +1239,6 @@ export default function Dashboard() {
             </div>
           ))}
         </div>
-
-        {/* Por estado */}
         <div
           style={{
             background: "var(--blk2)",
@@ -1344,7 +1288,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Tiempo promedio por transportadora ── */}
+      {/* Tiempos por transportadora */}
       {tiemposTrans.length > 0 && (
         <div
           style={{
@@ -1449,7 +1393,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── Envíos por mes ── */}
+      {/* Envíos por mes */}
       {enviosMes.meses?.length > 0 && (
         <div
           style={{
@@ -1471,7 +1415,7 @@ export default function Dashboard() {
             Envíos por mes por transportadora
           </div>
           <div style={{ fontSize: 10, color: "var(--gray)", marginBottom: 16 }}>
-            {rango ? `${rango.desde} → ${rango.hasta}` : "Últimos 6 meses"}
+            {rango ? `${rango.desde} → ${rango.hasta}` : "Histórico completo"}
           </div>
           <div
             style={{
@@ -1541,10 +1485,6 @@ export default function Dashboard() {
                   >
                     {enviosMes.transportadoras?.map((t, i) => {
                       const val = datosMes[t] || 0;
-                      const h =
-                        val > 0
-                          ? `${Math.max(8, (val / maxMes) * 100)}%`
-                          : "0px";
                       return (
                         <div
                           key={t}
@@ -1572,7 +1512,10 @@ export default function Dashboard() {
                           <div
                             style={{
                               width: "100%",
-                              height: h,
+                              height:
+                                val > 0
+                                  ? `${Math.max(8, (val / maxMes) * 100)}%`
+                                  : "0px",
                               background: COLORES[i % COLORES.length],
                               borderRadius: "3px 3px 0 0",
                               opacity: 0.85,
@@ -1615,7 +1558,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── Syncs ── */}
+      {/* Syncs */}
       <div
         style={{
           display: "grid",
@@ -1706,7 +1649,7 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* ── Tabla mejorada ── */}
+      {/* Tabla recientes */}
       <div
         style={{
           background: "var(--blk2)",
@@ -1715,7 +1658,6 @@ export default function Dashboard() {
           overflow: "hidden",
         }}
       >
-        {/* Cabecera tabla */}
         <div
           style={{
             padding: "12px 16px",
@@ -1758,8 +1700,6 @@ export default function Dashboard() {
             }}
           />
         </div>
-
-        {/* Tabla */}
         <div style={{ overflowX: "auto" }}>
           <table
             style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}
@@ -1929,7 +1869,6 @@ export default function Dashboard() {
             </tbody>
           </table>
         </div>
-
         {tablaFiltrada.length === 0 && (
           <div
             style={{
@@ -1942,8 +1881,6 @@ export default function Dashboard() {
             {buscar ? `Sin resultados para "${buscar}"` : "Sin guías aún"}
           </div>
         )}
-
-        {/* Paginación */}
         {totalPags > 1 && (
           <div
             style={{
