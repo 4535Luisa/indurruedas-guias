@@ -439,7 +439,7 @@ export default function Dashboard() {
 
   const kpis = useMemo(() => {
     const activas = guiasFiltradas.filter(
-      (g) => g.activa && g.estado !== "entregado" && g.estado !== "anulada",
+      (g) => g.estado !== "entregado" && g.estado !== "anulada",
     ).length;
     const entregadas = guiasFiltradas.filter(
       (g) => g.estado === "entregado",
@@ -476,14 +476,12 @@ export default function Dashboard() {
     const estelar = guiasFiltradas.filter(
       (g) =>
         g.transportadora === "estelar" &&
-        g.activa &&
         g.estado !== "entregado" &&
         g.estado !== "anulada",
     ).length;
     const tcc = guiasFiltradas.filter(
       (g) =>
         g.transportadora === "tcc" &&
-        g.activa &&
         g.estado !== "entregado" &&
         g.estado !== "anulada",
     ).length;
