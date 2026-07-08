@@ -372,47 +372,76 @@ export default function Dashboard() {
       .toISOString()
       .split("T")[0];
 
-    const [asesorRes, syncRes, criticasRes, todasRes, recientesRes] =
-      await Promise.all([
-        supabase.rpc("guias_por_asesor"),
-        supabase
-          .from("sync_log")
-          .select(
-            "created_at, guias_nuevas, guias_actualizadas, transportadora, detalle",
-          )
-          .order("created_at", { ascending: false })
-          .limit(20),
-        supabase
-          .from("guias")
-          .select(
-            "id, numero_guia, transportadora, transportadora_nombre, factura_indurruedas, estado, fecha_guia, ciudad_destino, clientes(nombre, usuarios(nombre))",
-          )
-          .eq("activa", true)
-          .neq("estado", "entregado")
-          .neq("estado", "anulada")
-          .lt("fecha_guia", hace6Dias)
-          .order("fecha_guia", { ascending: true })
-          .limit(50),
-        // TODAS las guías sin límite de fecha
-        supabase
-          .from("guias")
-          .select(
-            "numero_guia, transportadora, transportadora_nombre, estado, fecha_guia, ciudad_destino, activa, dias_habiles, clientes(nombre, usuarios(nombre))",
-          )
-          .not("fecha_guia", "is", null)
-          .limit(10000),
-        supabase
-          .from("guias")
-          .select(
-            "numero_guia, transportadora, transportadora_nombre, estado, fecha_guia, ciudad_destino, clientes(nombre, usuarios(nombre))",
-          )
-          .order("created_at", { ascending: false })
-          .limit(200),
-      ]);
+    const hace6Meses = new Date(Date.now() - 180 * 86400000)
+      .toISOString()
+      .split("T")[0];
+
+    const [
+      asesorRes,
+      syncRes,
+      criticasRes,
+      historicasRes,
+      activasRes,
+      recientesRes,
+    ] = await Promise.all([
+      supabase.rpc("guias_por_asesor"),
+      supabase
+        .from("sync_log")
+        .select(
+          "created_at, guias_nuevas, guias_actualizadas, transportadora, detalle",
+        )
+        .order("created_at", { ascending: false })
+        .limit(20),
+      supabase
+        .from("guias")
+        .select(
+          "id, numero_guia, transportadora, transportadora_nombre, factura_indurruedas, estado, fecha_guia, ciudad_destino, clientes(nombre, usuarios(nombre))",
+        )
+        .eq("activa", true)
+        .neq("estado", "entregado")
+        .neq("estado", "anulada")
+        .lt("fecha_guia", hace6Dias)
+        .order("fecha_guia", { ascending: true })
+        .limit(50),
+      // Guías históricas últimos 6 meses
+      supabase
+        .from("guias")
+        .select(
+          "numero_guia, transportadora, transportadora_nombre, estado, fecha_guia, ciudad_destino, activa, dias_habiles, clientes(nombre, usuarios(nombre))",
+        )
+        .gte("fecha_guia", hace6Meses)
+        .not("fecha_guia", "is", null)
+        .limit(5000),
+      // Todas las guías activas sin importar fecha
+      supabase
+        .from("guias")
+        .select(
+          "numero_guia, transportadora, transportadora_nombre, estado, fecha_guia, ciudad_destino, activa, dias_habiles, clientes(nombre, usuarios(nombre))",
+        )
+        .not("estado", "in", '("entregado","anulada")')
+        .not("fecha_guia", "is", null)
+        .limit(1000),
+      supabase
+        .from("guias")
+        .select(
+          "numero_guia, transportadora, transportadora_nombre, estado, fecha_guia, ciudad_destino, clientes(nombre, usuarios(nombre))",
+        )
+        .order("created_at", { ascending: false })
+        .limit(200),
+    ]);
+
+    // Combinar históricas + activas sin duplicados
+    const historicas = historicasRes.data || [];
+    const activas = activasRes.data || [];
+    const numerosEnHistoricas = new Set(historicas.map((g) => g.numero_guia));
+    const activasFaltantes = activas.filter(
+      (g) => !numerosEnHistoricas.has(g.numero_guia),
+    );
+    const todasCombinadas = [...historicas, ...activasFaltantes];
 
     setPorAsesor(asesorRes.data || []);
     setGuiasCriticas(criticasRes.data || []);
-    setTodasGuias(todasRes.data || []);
+    setTodasGuias(todasCombinadas);
     setUltimasGuias(recientesRes.data || []);
 
     const logs = syncRes.data || [];
