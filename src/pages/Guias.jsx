@@ -29,18 +29,10 @@ function esFBC(factura) {
   return f.includes("FBC") && !f.includes("FBG");
 }
 
-// Extrae facturas del campo ANEXOS de Estelar
-// Maneja casos como:
-// - "FBG-46156" → "FBG-46156"
-// - "FBG-46176-46175" → "FBG-46176, FBG-46175" (dos facturas pegadas)
-// - "FBG-46163 FBG-46164" → "FBG-46163, FBG-46164"
 function extraerFacturaEstelar(anexos) {
   if (!anexos) return null;
   const texto = String(anexos);
   const facturas = [];
-
-  // Expandir patrones de N facturas pegadas: FBG-46100-46101-46102-46103
-  // El regex captura FB[GC]- seguido de múltiples números separados por guión
   let textoExpandido = texto.replace(
     /FB([GC])-(\d+(?:-\d{4,})+)/gi,
     (match, tipo, numeros) => {
@@ -48,23 +40,16 @@ function extraerFacturaEstelar(anexos) {
       return nums.map((n) => `FB${tipo}-${n}`).join(" ");
     },
   );
-
-  // Manejar mezcla de tipos: FBG-46292ACC-1215 → FBG-46292 ACC-1215
   textoExpandido = textoExpandido.replace(
     /FB([GC])-(\d+)([A-Z]{2,3})-(\d+)/gi,
     (_, tipo, num1, tipo2, num2) => `FB${tipo}-${num1} ${tipo2}-${num2}`,
   );
-
-  // Extraer todas las facturas (FBG, FBC, ACC, REM)
   const matches = textoExpandido.match(/(?:FB[GC]|ACC|REM)-\d+/gi);
   if (!matches) return null;
-
-  // Limpiar y deduplicar
   for (const m of matches) {
     const limpio = m.replace(/\s/g, "").toUpperCase();
     if (!facturas.includes(limpio)) facturas.push(limpio);
   }
-
   return facturas.length > 0 ? facturas.join(", ") : null;
 }
 
@@ -204,6 +189,13 @@ export default function Guias() {
   });
   const [modalFechaEntrega, setModalFechaEntrega] = useState(null);
   const [fechaEntregaModal, setFechaEntregaModal] = useState("");
+  // Selección múltiple
+  const [seleccionadas, setSeleccionadas] = useState(new Set());
+  const [modalEntregaMasiva, setModalEntregaMasiva] = useState(false);
+  const [fechaMasiva, setFechaMasiva] = useState(
+    new Date().toISOString().split("T")[0],
+  );
+  const [guardandoMasivo, setGuardandoMasivo] = useState(false);
   const fileEstelarRef = useRef();
   const fileTccRef = useRef();
   const clienteCache = useRef({});
@@ -229,6 +221,11 @@ export default function Guias() {
     }, 400);
     return () => clearTimeout(t);
   }, [filtroTexto]);
+
+  // Limpiar selección al cambiar página o filtros
+  useEffect(() => {
+    setSeleccionadas(new Set());
+  }, [pagina, busqueda, filtroTransp, filtroEstado, filtroAsesor]);
 
   async function cargarAsesores() {
     const { data } = await supabase
@@ -317,7 +314,6 @@ export default function Guias() {
       ? `nit:${nitLimpio}`
       : `nombre:${String(nombre || "").trim()}`;
     if (key in clienteCache.current) return clienteCache.current[key];
-
     if (nitLimpio) {
       const { data } = await supabase
         .from("clientes")
@@ -329,7 +325,6 @@ export default function Guias() {
         return data[0].id;
       }
     }
-
     if (nombre && nombre.trim().length > 2) {
       const nombreLimpio = nombre.trim();
       const { data: exacto } = await supabase
@@ -351,7 +346,6 @@ export default function Guias() {
         return parcial[0].id;
       }
     }
-
     clienteCache.current[key] = null;
     return null;
   }
@@ -364,7 +358,6 @@ export default function Guias() {
     ciudad,
   ) {
     if (!esFBC(factura)) return clienteId;
-
     if (clienteId) {
       await supabase
         .from("clientes")
@@ -372,23 +365,16 @@ export default function Guias() {
         .eq("id", clienteId);
       return clienteId;
     }
-
     const nombre = destinatario || "CLIENTE FBC";
     const nitCliente =
       nit && nit !== "nan" && String(nit).trim().length > 3
         ? String(nit).trim()
         : `FBC-${Date.now()}`;
-
     const { data: nuevoCliente } = await supabase
       .from("clientes")
-      .insert({
-        nit: nitCliente,
-        nombre,
-        asesor_id: SIMON_ID,
-      })
+      .insert({ nit: nitCliente, nombre, asesor_id: SIMON_ID })
       .select("id")
       .single();
-
     if (nuevoCliente) {
       if (nit) clienteCache.current[`nit:${nit}`] = nuevoCliente.id;
       clienteCache.current[`nombre:${nombre}`] = nuevoCliente.id;
@@ -410,14 +396,12 @@ export default function Guias() {
     let nuevas = 0,
       actualizadas = 0,
       errores = 0;
-
     try {
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer);
       const rows = XLSX.utils
         .sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" })
         .filter((r) => String(r["GUIA"] || "").trim());
-
       setProgreso({
         activo: true,
         actual: 0,
@@ -425,7 +409,6 @@ export default function Guias() {
         texto: "Verificando guias existentes...",
         trans: "Estelar Express",
       });
-
       const numerosGuia = rows
         .map((r) => String(r["GUIA"]).trim())
         .filter(Boolean);
@@ -437,10 +420,8 @@ export default function Guias() {
       (existentes || []).forEach((g) => {
         existentesMap[g.numero_guia] = g;
       });
-
-      const porInsertar = [];
-      const porActualizar = [];
-
+      const porInsertar = [],
+        porActualizar = [];
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         setProgreso((p) => ({
@@ -448,7 +429,6 @@ export default function Guias() {
           actual: i + 1,
           texto: `Preparando ${i + 1} de ${rows.length}...`,
         }));
-
         const numeroGuia = String(row["GUIA"] || "").trim();
         const estado = normalizarEstadoEstelar(String(row["ESTADO"] || ""));
         const factura = extraerFacturaEstelar(row["ANEXOS"]);
@@ -462,7 +442,6 @@ export default function Guias() {
         const nit = String(row["DOCUMENTO DESTINATARIO"] || "").trim();
         const ciudad = String(row["CIUDAD DESTINO"] || "").trim();
         const direccion = String(row["DIRECCION DESTINO"] || "").trim();
-
         let clienteId = await buscarClienteConCache(nit, destinatario);
         clienteId = await gestionarClienteFBC(
           factura,
@@ -471,7 +450,6 @@ export default function Guias() {
           nit,
           ciudad,
         );
-
         if (existentesMap[numeroGuia]) {
           porActualizar.push({
             id: existentesMap[numeroGuia].id,
@@ -498,7 +476,6 @@ export default function Guias() {
           });
         }
       }
-
       setProgreso((p) => ({
         ...p,
         texto: "Insertando guias nuevas...",
@@ -516,7 +493,6 @@ export default function Guias() {
           actual: Math.min(i + LOTE, porInsertar.length),
         }));
       }
-
       setProgreso((p) => ({
         ...p,
         texto: "Actualizando estados...",
@@ -538,7 +514,6 @@ export default function Guias() {
           actual: Math.min(i + LOTE, porActualizar.length),
         }));
       }
-
       await supabase
         .from("sync_log")
         .insert({
@@ -573,14 +548,12 @@ export default function Guias() {
     let nuevas = 0,
       actualizadas = 0,
       errores = 0;
-
     try {
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer);
       const rows = XLSX.utils
         .sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" })
         .filter((r) => String(r["Nro. de Remision TCC"] || "").trim());
-
       setProgreso({
         activo: true,
         actual: 0,
@@ -588,7 +561,6 @@ export default function Guias() {
         texto: "Verificando guias existentes...",
         trans: "TCC",
       });
-
       const numerosGuia = rows.map((r) =>
         String(r["Nro. de Remision TCC"]).trim(),
       );
@@ -600,10 +572,8 @@ export default function Guias() {
       (existentes || []).forEach((g) => {
         existentesMap[g.numero_guia] = g;
       });
-
-      const porInsertar = [];
-      const porActualizar = [];
-
+      const porInsertar = [],
+        porActualizar = [];
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         setProgreso((p) => ({
@@ -611,7 +581,6 @@ export default function Guias() {
           actual: i + 1,
           texto: `Preparando ${i + 1} de ${rows.length}...`,
         }));
-
         const numeroGuia = String(row["Nro. de Remision TCC"] || "").trim();
         const factura = String(row["Documento Cliente"] || "").trim() || null;
         const fechaGuia = parsearFechaTCC(row["Fecha(dd/mm/aaaa)"]);
@@ -626,7 +595,6 @@ export default function Guias() {
           estado === "entregado"
             ? parseInt(row["Dias de entrega (habiles)"]) || null
             : null;
-
         let clienteId = await buscarClienteConCache(null, destinatario);
         clienteId = await gestionarClienteFBC(
           factura,
@@ -635,7 +603,6 @@ export default function Guias() {
           null,
           destino,
         );
-
         if (existentesMap[numeroGuia]) {
           porActualizar.push({
             id: existentesMap[numeroGuia].id,
@@ -667,7 +634,6 @@ export default function Guias() {
           });
         }
       }
-
       setProgreso((p) => ({
         ...p,
         texto: "Insertando guias nuevas...",
@@ -692,7 +658,6 @@ export default function Guias() {
           actual: Math.min(i + LOTE, porInsertar.length),
         }));
       }
-
       setProgreso((p) => ({
         ...p,
         texto: "Actualizando estados...",
@@ -710,7 +675,6 @@ export default function Guias() {
         else errores++;
         setProgreso((p) => ({ ...p, actual: i + 1 }));
       }
-
       await supabase
         .from("sync_log")
         .insert({
@@ -832,7 +796,68 @@ export default function Guias() {
     setModalFechaEntrega(null);
   }
 
+  // Entrega masiva
+  async function confirmarEntregaMasiva() {
+    setGuardandoMasivo(true);
+    const guiasSelec = guias.filter(
+      (g) => seleccionadas.has(g.id) && g.estado !== "entregado",
+    );
+    for (const g of guiasSelec) {
+      const fechaGuia = g.fecha_guia ? new Date(g.fecha_guia) : null;
+      const dias = fechaGuia
+        ? Math.floor((new Date(fechaMasiva) - fechaGuia) / 86400000)
+        : null;
+      await supabase
+        .from("guias")
+        .update({
+          estado: "entregado",
+          fecha_entrega: fechaMasiva,
+          dias_habiles: dias,
+          activa: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", g.id);
+      await supabase
+        .from("historial_estados")
+        .insert({
+          guia_id: g.id,
+          estado_anterior: g.estado,
+          estado_nuevo: "entregado",
+          fuente: "admin",
+        });
+    }
+    setSeleccionadas(new Set());
+    setModalEntregaMasiva(false);
+    setGuardandoMasivo(false);
+    cargarGuias();
+  }
+
+  function toggleSeleccion(id) {
+    setSeleccionadas((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleTodas() {
+    const elegibles = guias.filter(
+      (g) => g.estado !== "entregado" && g.estado !== "anulada",
+    );
+    if (seleccionadas.size === elegibles.length) {
+      setSeleccionadas(new Set());
+    } else {
+      setSeleccionadas(new Set(elegibles.map((g) => g.id)));
+    }
+  }
+
   const totalPaginas = Math.ceil(total / POR_PAGINA);
+  const elegibles = guias.filter(
+    (g) => g.estado !== "entregado" && g.estado !== "anulada",
+  );
+  const todasSeleccionadas =
+    elegibles.length > 0 && seleccionadas.size === elegibles.length;
 
   return (
     <div>
@@ -933,6 +958,64 @@ export default function Guias() {
         </div>
       )}
 
+      {/* Banner selección múltiple */}
+      {seleccionadas.size > 0 && (
+        <div
+          style={{
+            background: "rgba(170,255,0,0.08)",
+            border: "1px solid var(--m)",
+            borderRadius: "8px",
+            padding: "10px 16px",
+            marginBottom: "14px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+          }}
+        >
+          <span
+            style={{ fontSize: "12px", color: "var(--m)", fontWeight: "500" }}
+          >
+            ✓ {seleccionadas.size} guía{seleccionadas.size > 1 ? "s" : ""}{" "}
+            seleccionada{seleccionadas.size > 1 ? "s" : ""}
+          </span>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              onClick={() => {
+                setFechaMasiva(new Date().toISOString().split("T")[0]);
+                setModalEntregaMasiva(true);
+              }}
+              style={{
+                padding: "6px 14px",
+                background: "var(--m)",
+                color: "var(--blk)",
+                border: "none",
+                borderRadius: "6px",
+                fontSize: "12px",
+                fontWeight: "500",
+                cursor: "pointer",
+              }}
+            >
+              ✓ Marcar {seleccionadas.size} como entregadas
+            </button>
+            <button
+              onClick={() => setSeleccionadas(new Set())}
+              style={{
+                padding: "6px 12px",
+                background: "transparent",
+                border: "1px solid var(--blk5)",
+                borderRadius: "6px",
+                color: "var(--gray)",
+                fontSize: "12px",
+                cursor: "pointer",
+              }}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
       <div
         style={{
           display: "flex",
@@ -1022,6 +1105,15 @@ export default function Guias() {
             <Table>
               <thead>
                 <tr>
+                  <Th>
+                    <input
+                      type="checkbox"
+                      checked={todasSeleccionadas}
+                      onChange={toggleTodas}
+                      title="Seleccionar todas las no entregadas"
+                      style={{ cursor: "pointer" }}
+                    />
+                  </Th>
                   <Th>N Guia</Th>
                   <Th>Transp.</Th>
                   <Th>Factura</Th>
@@ -1048,16 +1140,38 @@ export default function Guias() {
                       (fechaFin - new Date(g.fecha_guia)) / 86400000,
                     );
                   }
+                  const seleccionable =
+                    g.estado !== "entregado" && g.estado !== "anulada";
+                  const seleccionada = seleccionadas.has(g.id);
                   return (
                     <tr
                       key={g.id}
                       onMouseEnter={(e) =>
-                        (e.currentTarget.style.background = "var(--hover-bg)")
+                        (e.currentTarget.style.background = seleccionada
+                          ? "rgba(170,255,0,0.08)"
+                          : "var(--hover-bg)")
                       }
                       onMouseLeave={(e) =>
-                        (e.currentTarget.style.background = "transparent")
+                        (e.currentTarget.style.background = seleccionada
+                          ? "rgba(170,255,0,0.05)"
+                          : "transparent")
                       }
+                      style={{
+                        background: seleccionada
+                          ? "rgba(170,255,0,0.05)"
+                          : "transparent",
+                      }}
                     >
+                      <Td>
+                        {seleccionable && (
+                          <input
+                            type="checkbox"
+                            checked={seleccionada}
+                            onChange={() => toggleSeleccion(g.id)}
+                            style={{ cursor: "pointer" }}
+                          />
+                        )}
+                      </Td>
                       <Td>
                         <span
                           style={{
@@ -1326,6 +1440,7 @@ export default function Guias() {
         />
       )}
 
+      {/* Modal entrega individual */}
       {modalFechaEntrega && (
         <div
           style={{
@@ -1412,6 +1527,160 @@ export default function Guias() {
               </button>
               <button
                 onClick={() => setModalFechaEntrega(null)}
+                style={{
+                  padding: "10px 16px",
+                  background: "transparent",
+                  border: "1px solid var(--blk5)",
+                  borderRadius: "7px",
+                  color: "var(--gray)",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal entrega masiva */}
+      {modalEntregaMasiva && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.75)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+          }}
+          onClick={() => setModalEntregaMasiva(false)}
+        >
+          <div
+            style={{
+              background: "var(--blk2)",
+              border: "1px solid var(--m)",
+              borderRadius: "12px",
+              width: "100%",
+              maxWidth: "480px",
+              padding: "24px",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                fontSize: "15px",
+                fontWeight: "500",
+                color: "var(--wht)",
+                marginBottom: "4px",
+              }}
+            >
+              ✓ Confirmar entrega masiva
+            </div>
+            <div
+              style={{
+                fontSize: "12px",
+                color: "var(--gray)",
+                marginBottom: "16px",
+              }}
+            >
+              Se marcarán{" "}
+              <strong style={{ color: "var(--m)" }}>
+                {seleccionadas.size} guías
+              </strong>{" "}
+              como entregadas
+            </div>
+
+            {/* Lista de guías seleccionadas */}
+            <div
+              style={{
+                maxHeight: "200px",
+                overflowY: "auto",
+                marginBottom: "16px",
+                border: "1px solid var(--blk4)",
+                borderRadius: "8px",
+              }}
+            >
+              {guias
+                .filter((g) => seleccionadas.has(g.id))
+                .map((g) => (
+                  <div
+                    key={g.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      padding: "8px 12px",
+                      borderBottom: "1px solid var(--blk3)",
+                      fontSize: "11px",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        color: "var(--m)",
+                        minWidth: "100px",
+                      }}
+                    >
+                      {g.numero_guia}
+                    </span>
+                    <span style={{ color: "var(--wht2)", flex: 1 }}>
+                      {g.clientes?.nombre || g.destinatario || "—"}
+                    </span>
+                    <span style={{ color: "var(--gray)" }}>
+                      {g.ciudad_destino || "—"}
+                    </span>
+                  </div>
+                ))}
+            </div>
+
+            <div style={{ marginBottom: "20px" }}>
+              <label
+                style={{
+                  fontSize: "10px",
+                  color: "var(--gray)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".05em",
+                  display: "block",
+                  marginBottom: "6px",
+                }}
+              >
+                Fecha de entrega para todas
+              </label>
+              <input
+                type="date"
+                value={fechaMasiva}
+                onChange={(e) => setFechaMasiva(e.target.value)}
+                max={new Date().toISOString().split("T")[0]}
+                style={{ width: "100%", fontSize: "14px", padding: "10px" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                onClick={confirmarEntregaMasiva}
+                disabled={guardandoMasivo}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  background: "var(--m)",
+                  color: "var(--blk)",
+                  border: "none",
+                  borderRadius: "7px",
+                  fontSize: "13px",
+                  fontWeight: "500",
+                  cursor: "pointer",
+                }}
+              >
+                {guardandoMasivo
+                  ? `Procesando...`
+                  : `✓ Confirmar ${seleccionadas.size} entregas`}
+              </button>
+              <button
+                onClick={() => setModalEntregaMasiva(false)}
                 style={{
                   padding: "10px 16px",
                   background: "transparent",
