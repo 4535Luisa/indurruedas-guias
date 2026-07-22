@@ -16,6 +16,9 @@ export default function Usuarios() {
   });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [modalPassword, setModalPassword] = useState(null); // usuario al que cambiar contraseña
+  const [nuevaPassword, setNuevaPassword] = useState("");
+  const [cambiandoPass, setCambiandoPass] = useState(false);
 
   useEffect(() => {
     cargarUsuarios();
@@ -124,19 +127,39 @@ export default function Usuarios() {
     );
   }
 
-  async function resetPassword(usuario) {
-    const { error } = await supabase.auth.resetPasswordForEmail(usuario.email);
-    if (!error) {
-      setMsg({
-        tipo: "ok",
-        texto: `Email de recuperación enviado a ${usuario.email}`,
-      });
-    } else {
+  async function cambiarPassword() {
+    if (!nuevaPassword.trim() || nuevaPassword.length < 6) {
       setMsg({
         tipo: "error",
-        texto: "Error al enviar email: " + error.message,
+        texto: "La contraseña debe tener mínimo 6 caracteres",
+      });
+      return;
+    }
+    setCambiandoPass(true);
+    setMsg(null);
+    try {
+      // Usar admin API para cambiar contraseña sin email
+      const { error } = await supabase.auth.admin.updateUserById(
+        modalPassword.id,
+        {
+          password: nuevaPassword,
+        },
+      );
+      if (error) throw new Error(error.message);
+      setMsg({
+        tipo: "ok",
+        texto: `✓ Contraseña de ${modalPassword.nombre} actualizada correctamente`,
+      });
+      setModalPassword(null);
+      setNuevaPassword("");
+    } catch (err) {
+      // Si admin API no está disponible, mostrar SQL alternativo
+      setMsg({
+        tipo: "error",
+        texto: `No se pudo cambiar desde aquí. Ejecuta en Supabase SQL Editor: UPDATE auth.users SET encrypted_password = crypt('${nuevaPassword}', gen_salt('bf')) WHERE email = '${modalPassword.email}';`,
       });
     }
+    setCambiandoPass(false);
   }
 
   const ROLES = {
@@ -536,7 +559,10 @@ export default function Usuarios() {
                           {u.activo ? "Desactivar" : "Activar"}
                         </button>
                         <button
-                          onClick={() => resetPassword(u)}
+                          onClick={() => {
+                            setModalPassword(u);
+                            setNuevaPassword("");
+                          }}
                           style={{
                             fontSize: "10px",
                             padding: "3px 8px",
@@ -547,7 +573,7 @@ export default function Usuarios() {
                             cursor: "pointer",
                           }}
                         >
-                          Reset contraseña
+                          Cambiar contraseña
                         </button>
                       </div>
                     </Td>
@@ -556,6 +582,115 @@ export default function Usuarios() {
               })}
             </tbody>
           </Table>
+        </div>
+      )}
+      {/* Modal cambiar contraseña */}
+      {modalPassword && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.75)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+          }}
+          onClick={() => setModalPassword(null)}
+        >
+          <div
+            style={{
+              background: "var(--blk2)",
+              border: "1px solid var(--blk4)",
+              borderRadius: "12px",
+              width: "100%",
+              maxWidth: "400px",
+              padding: "24px",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                fontSize: "15px",
+                fontWeight: "500",
+                color: "var(--wht)",
+                marginBottom: "4px",
+              }}
+            >
+              🔑 Cambiar contraseña
+            </div>
+            <div
+              style={{
+                fontSize: "12px",
+                color: "var(--gray)",
+                marginBottom: "20px",
+              }}
+            >
+              {modalPassword.nombre} · {modalPassword.email}
+            </div>
+            <div style={{ marginBottom: "16px" }}>
+              <label
+                style={{
+                  fontSize: "10px",
+                  color: "var(--gray)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".05em",
+                  display: "block",
+                  marginBottom: "5px",
+                }}
+              >
+                Nueva contraseña
+              </label>
+              <input
+                type="password"
+                value={nuevaPassword}
+                onChange={(e) => setNuevaPassword(e.target.value)}
+                placeholder="Mínimo 6 caracteres"
+                minLength={6}
+                autoFocus
+                style={{ width: "100%", fontSize: "14px", padding: "10px" }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                onClick={cambiarPassword}
+                disabled={cambiandoPass || nuevaPassword.length < 6}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  background:
+                    nuevaPassword.length >= 6 ? "var(--m)" : "var(--blk4)",
+                  color:
+                    nuevaPassword.length >= 6 ? "var(--blk)" : "var(--gray)",
+                  border: "none",
+                  borderRadius: "7px",
+                  fontSize: "13px",
+                  fontWeight: "500",
+                  cursor: nuevaPassword.length >= 6 ? "pointer" : "not-allowed",
+                }}
+              >
+                {cambiandoPass ? "Cambiando..." : "✓ Cambiar contraseña"}
+              </button>
+              <button
+                onClick={() => {
+                  setModalPassword(null);
+                  setNuevaPassword("");
+                }}
+                style={{
+                  padding: "10px 16px",
+                  background: "transparent",
+                  border: "1px solid var(--blk5)",
+                  borderRadius: "7px",
+                  color: "var(--gray)",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
