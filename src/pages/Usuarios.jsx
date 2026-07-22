@@ -138,14 +138,25 @@ export default function Usuarios() {
     setCambiandoPass(true);
     setMsg(null);
     try {
-      // Usar admin API para cambiar contraseña sin email
-      const { error } = await supabase.auth.admin.updateUserById(
-        modalPassword.id,
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cambiar-password`,
         {
-          password: nuevaPassword,
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            userId: modalPassword.id,
+            password: nuevaPassword,
+          }),
         },
       );
-      if (error) throw new Error(error.message);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Error al cambiar contraseña");
       setMsg({
         tipo: "ok",
         texto: `✓ Contraseña de ${modalPassword.nombre} actualizada correctamente`,
@@ -153,11 +164,7 @@ export default function Usuarios() {
       setModalPassword(null);
       setNuevaPassword("");
     } catch (err) {
-      // Si admin API no está disponible, mostrar SQL alternativo
-      setMsg({
-        tipo: "error",
-        texto: `No se pudo cambiar desde aquí. Ejecuta en Supabase SQL Editor: UPDATE auth.users SET encrypted_password = crypt('${nuevaPassword}', gen_salt('bf')) WHERE email = '${modalPassword.email}';`,
-      });
+      setMsg({ tipo: "error", texto: "Error: " + err.message });
     }
     setCambiandoPass(false);
   }
