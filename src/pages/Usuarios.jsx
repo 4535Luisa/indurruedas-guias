@@ -16,7 +16,7 @@ export default function Usuarios() {
   });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
-  const [modalPassword, setModalPassword] = useState(null); // usuario al que cambiar contraseña
+  const [modalPassword, setModalPassword] = useState(null);
   const [nuevaPassword, setNuevaPassword] = useState("");
   const [cambiandoPass, setCambiandoPass] = useState(false);
 
@@ -65,33 +65,31 @@ export default function Usuarios() {
     setMsg(null);
 
     try {
-      // 1. Crear en Supabase Auth usando signUp
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: form.email.trim(),
-        password: form.password,
-        options: { data: { nombre: form.nombre.trim() } },
-      });
-
-      if (authError) throw new Error(authError.message);
-      if (!authData?.user) throw new Error("No se pudo crear el usuario");
-
-      // 2. Insertar en public.usuarios
-      const { error: insertError } = await supabase.from("usuarios").insert({
-        id: authData.user.id,
-        email: form.email.trim(),
-        nombre: form.nombre.trim().toUpperCase(),
-        rol: form.rol,
-        activo: true,
-        ...(form.rol === "transportador" && form.transportadora_id
-          ? { transportadora_id: form.transportadora_id }
-          : {}),
-      });
-
-      if (insertError) throw new Error(insertError.message);
-
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/crear-usuario`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            email: form.email.trim().toLowerCase(),
+            password: form.password,
+            nombre: form.nombre.trim(),
+            rol: form.rol,
+            transportadora_id: form.transportadora_id || null,
+          }),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Error al crear usuario");
       setMsg({
         tipo: "ok",
-        texto: `✓ Usuario ${form.nombre} creado correctamente como ${form.rol}`,
+        texto: `✓ Usuario ${form.nombre} creado correctamente — puede ingresar de inmediato`,
       });
       setForm({
         nombre: "",
@@ -103,28 +101,19 @@ export default function Usuarios() {
       setCreando(false);
       cargarUsuarios();
     } catch (err) {
-      // Si el signUp falla por email ya existente, intentar solo insertar en public.usuarios
-      if (err.message.includes("already registered")) {
+      if (
+        err.message.includes("already registered") ||
+        err.message.includes("already exists")
+      ) {
         setMsg({
           tipo: "error",
-          texto:
-            "Este correo ya tiene una cuenta. El usuario debe iniciar sesión con su contraseña anterior.",
+          texto: "Este correo ya tiene una cuenta registrada",
         });
       } else {
         setMsg({ tipo: "error", texto: "Error: " + err.message });
       }
     }
     setSaving(false);
-  }
-
-  async function toggleActivo(usuario) {
-    await supabase
-      .from("usuarios")
-      .update({ activo: !usuario.activo })
-      .eq("id", usuario.id);
-    setUsuarios((prev) =>
-      prev.map((u) => (u.id === usuario.id ? { ...u, activo: !u.activo } : u)),
-    );
   }
 
   async function cambiarPassword() {
@@ -167,6 +156,16 @@ export default function Usuarios() {
       setMsg({ tipo: "error", texto: "Error: " + err.message });
     }
     setCambiandoPass(false);
+  }
+
+  async function toggleActivo(usuario) {
+    await supabase
+      .from("usuarios")
+      .update({ activo: !usuario.activo })
+      .eq("id", usuario.id);
+    setUsuarios((prev) =>
+      prev.map((u) => (u.id === usuario.id ? { ...u, activo: !u.activo } : u)),
+    );
   }
 
   const ROLES = {
@@ -380,8 +379,6 @@ export default function Usuarios() {
                   <option value="visualizador">Visualizador</option>
                 </select>
               </div>
-
-              {/* Si es transportador, mostrar selector de transportadora */}
               {form.rol === "transportador" && (
                 <div style={{ gridColumn: "1/-1" }}>
                   <label
@@ -418,7 +415,6 @@ export default function Usuarios() {
               )}
             </div>
 
-            {/* Info según rol */}
             <div
               style={{
                 background: "var(--blk3)",
@@ -431,8 +427,7 @@ export default function Usuarios() {
             >
               {form.rol === "asesor" &&
                 "👤 Puede ver sus guías asignadas y el detalle de cada una."}
-              {form.rol === "admin" &&
-                "⚙️ Acceso completo al sistema — guías, clientes, usuarios y configuración."}
+              {form.rol === "admin" && "⚙️ Acceso completo al sistema."}
               {form.rol === "transportador" &&
                 "🚚 Solo ve las guías de su transportadora y puede marcarlas como entregadas."}
               {form.rol === "visualizador" &&
@@ -454,7 +449,7 @@ export default function Usuarios() {
                   cursor: saving ? "not-allowed" : "pointer",
                 }}
               >
-                {saving ? "Creando usuario..." : "+ Crear usuario"}
+                {saving ? "Creando..." : "+ Crear usuario"}
               </button>
               <Btn
                 onClick={() => {
@@ -469,7 +464,7 @@ export default function Usuarios() {
         </div>
       )}
 
-      {/* Lista de usuarios */}
+      {/* Lista */}
       {loading ? (
         <div
           style={{
@@ -591,6 +586,7 @@ export default function Usuarios() {
           </Table>
         </div>
       )}
+
       {/* Modal cambiar contraseña */}
       {modalPassword && (
         <div
