@@ -3,3 +3,8 @@ dist
 .env
 .env.local
 bot/node_modules
+
+.netlify
+
+# Material de trabajo con facturas reales de clientes (no subir)
+generacion_guias/

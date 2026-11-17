@@ -144,6 +144,15 @@ export default function Layout() {
           <NavLink to="/planilla" style={linkStyle}>
             <span>◐</span> Subir planilla
           </NavLink>
+          <NavLink to="/generar-guias" style={linkStyle}>
+            <span>✚</span> Generar guías
+          </NavLink>
+          <NavLink to="/productos" style={linkStyle}>
+            <span>▤</span> Productos
+          </NavLink>
+          <NavLink to="/config-envios" style={linkStyle}>
+            <span>⚙</span> Config. envíos
+          </NavLink>
           <NavLink to="/transportadoras" style={linkStyle}>
             <span>🚚</span> Transportadoras
           </NavLink>

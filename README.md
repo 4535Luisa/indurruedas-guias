@@ -180,3 +180,51 @@ indurruedas/
 
 - Sistema desarrollado para Indurruedas SAS / MACHO Herramientas
 - Stack: React + Vite + Supabase + Playwright + GitHub Actions + Netlify
+
+---
+
+## Generación automática de guías desde facturas (TCC)
+
+Menú **Generar guías**: se suben los PDF de las facturas. Por cada una la app
+lee cliente, dirección, ciudad y productos; calcula los bultos con el catálogo
+de **Productos**; cotiza en TCC; y si no hay novedades genera la remesa y deja
+los rótulos listos. Las que necesitan revisión quedan en "Por revisar" con el
+motivo.
+
+Archivos principales:
+
+| Archivo | Qué hace |
+|---|---|
+| `src/lib/envios/factura.js` | Lee el PDF de la factura |
+| `src/lib/envios/empaque.js` | Calcula bultos, peso real y peso volumen |
+| `src/lib/envios/reglas.js` | Decide cuándo se pide revisión humana |
+| `src/lib/envios/tcc.js` | Arma las solicitudes a la API de TCC |
+| `src/lib/envios/estelar.js` | Pendiente: API de Estelar Express |
+| `netlify/functions/tcc.mjs` | Habla con TCC (guarda token y cuenta en el servidor) |
+| `supabase/migrations/20261113_generacion_guias.sql` | Tablas `productos`, `config_envios`, `despachos` |
+
+### Puesta en marcha
+
+1. **Supabase → SQL Editor:** ejecutar `supabase/migrations/20261113_generacion_guias.sql` (solo crea tablas nuevas).
+2. **Netlify → Environment variables:** `TCC_AMBIENTE=pruebas`. Para producción:
+   `TCC_AMBIENTE=produccion`, `TCC_ACCESS_TOKEN` y `TCC_CUENTA` (los entrega TCC).
+3. **Productos:** descargar el Excel, llenar pesos y medidas, subirlo.
+4. **Config. envíos:** revisar remitente, factor volumétrico y reglas.
+5. **Config. envíos → Flete máximo por municipio:** subir el Excel `PORCENTAJE DE ENVIOS`
+   (MUNICIPIO, DEPARTAMENTO, PORCENTAJE). Si el flete de la transportadora elegida supera
+   ese % del valor de la factura, queda en revisión (`FLETE_ALTO`). No hay límite general:
+   si el municipio no está en la tabla, se cotiza igual con las APIs, la factura queda en
+   revisión (`SIN_PORCENTAJE`) mostrando qué transportadoras llegan, y en el detalle se
+   ingresa el porcentaje (queda guardado en la tabla). Lógica en `src/lib/envios/porcentajes.js`.
+
+### Desarrollo local
+
+Basta con `npm run dev`: `vite.config.js` atiende también `/.netlify/functions/*` en local.
+
+```bash
+npm run dev              # http://localhost:3000, con la función de TCC incluida
+npm test                 # pruebas de la lógica
+```
+
+En ambiente de **pruebas** las guías se crean en el sistema de pruebas de TCC y
+**no** se registran en la tabla `guias` (no aparecen en el dashboard).

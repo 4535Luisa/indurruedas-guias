@@ -10,6 +10,9 @@ import AsesorGuias from "./pages/AsesorGuias";
 import TransportadorGuias from "./pages/TransportadorGuias";
 import VisualizadorDashboard from "./pages/VisualizadorDashboard";
 import SubirPlanilla from "./pages/SubirPlanilla";
+import GenerarGuias from "./pages/GenerarGuias";
+import Productos from "./pages/Productos";
+import ConfigEnvios from "./pages/ConfigEnvios";
 import Layout from "./components/Layout";
 
 function Loading() {
@@ -50,6 +53,9 @@ export default function App() {
           <Route path="/guias" element={<Guias />} />
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/planilla" element={<SubirPlanilla />} />
+          <Route path="/generar-guias" element={<GenerarGuias />} />
+          <Route path="/productos" element={<Productos />} />
+          <Route path="/config-envios" element={<ConfigEnvios />} />
           <Route path="/transportadoras" element={<Transportadoras />} />
           <Route path="/usuarios" element={<Usuarios />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
