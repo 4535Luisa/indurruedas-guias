@@ -28,7 +28,7 @@ export function PillTransportadora({ transportadora }) {
 
 export function DiasActiva({ dias }) {
   const n = parseInt(dias) || 0
-  const color = n >= 10 ? '#FF4444' : n >= 6 ? '#FFAA00' : '#AAFF00'
+  const color = n >= 10 ? 'var(--danger)' : n >= 6 ? '#FFAA00' : '#AAFF00'
   return <span style={{ color, fontWeight:'500', fontFamily:'var(--font-mono)', fontSize:'12px' }}>{n}</span>
 }
 
@@ -61,7 +61,7 @@ export function Btn({ children, onClick, variant='default', disabled, style={} }
   const variants = {
     default: { background:'transparent', border:'1px solid var(--blk5)', color:'var(--wht3)' },
     primary: { background:'var(--m)', border:'1px solid var(--m)', color:'var(--blk)', fontWeight:'500' },
-    danger:  { background:'transparent', border:'1px solid #440000', color:'#FF4444' },
+    danger:  { background:'transparent', border:'1px solid var(--danger-border)', color:'var(--danger)' },
   }
   return (
     <button

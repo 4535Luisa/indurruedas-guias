@@ -802,8 +802,8 @@ export default function SubirPlanilla() {
       {resultado && (
         <div
           style={{
-            background: resultado.error ? "#2a0000" : "#0d1f00",
-            border: `1px solid ${resultado.error ? "#440000" : "#1a3300"}`,
+            background: resultado.error ? "var(--danger-bg)" : "var(--ok-bg)",
+            border: `1px solid ${resultado.error ? "var(--danger-border)" : "var(--ok-border)"}`,
             borderRadius: "8px",
             padding: "12px 16px",
             marginBottom: "16px",
@@ -833,7 +833,7 @@ export default function SubirPlanilla() {
       {conflictos.length > 0 && (
         <div
           style={{
-            background: "#1a0800",
+            background: "var(--alert-bg)",
             border: "1px solid var(--warn)",
             borderRadius: "10px",
             padding: "16px",
