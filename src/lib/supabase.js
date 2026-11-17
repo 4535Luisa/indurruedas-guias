@@ -8,56 +8,56 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 export const ESTADOS = {
   en_transito: {
     label: "En tránsito",
-    color: "#55AAFF",
-    bg: "#001a33",
-    border: "#003366",
+    color: "var(--info)",
+    bg: "var(--info-bg)",
+    border: "var(--info-border)",
   },
   entregado: {
     label: "Entregado",
-    color: "#AAFF00",
-    bg: "#0d1f00",
-    border: "#1a3300",
+    color: "var(--m)",
+    bg: "var(--ok-bg)",
+    border: "var(--ok-border)",
   },
   pendiente: {
     label: "Pendiente recogida",
-    color: "#FFAA00",
-    bg: "#2a1800",
-    border: "#3d2400",
+    color: "var(--warn)",
+    bg: "var(--warn-bg)",
+    border: "var(--warn-border)",
   },
   novedad: {
     label: "Con novedad",
-    color: "#FF4444",
-    bg: "#2a0000",
-    border: "#440000",
+    color: "var(--danger)",
+    bg: "var(--danger-bg)",
+    border: "var(--danger-border)",
   },
   informada: {
     label: "Informada TCC",
-    color: "#888888",
-    bg: "#1a1a1a",
-    border: "#2e2e2e",
+    color: "var(--gray)",
+    bg: "var(--neutral-bg)",
+    border: "var(--neutral-border)",
   },
   no_despachada: {
     label: "No despachada",
-    color: "#FF8800",
-    bg: "#2a1200",
-    border: "#3d1a00",
+    color: "var(--orange)",
+    bg: "var(--orange-bg)",
+    border: "var(--orange-border)",
   },
   anulada: {
     label: "Anulada",
-    color: "#666666",
-    bg: "#1a1a1a",
-    border: "#2e2e2e",
+    color: "var(--gray)",
+    bg: "var(--neutral-bg)",
+    border: "var(--neutral-border)",
   },
 };
 
 export const TRANSPORTADORAS = {
   estelar: {
     label: "Estelar Express",
-    color: "#AAFF00",
-    bg: "#0d1f00",
-    border: "#1a3300",
+    color: "var(--m)",
+    bg: "var(--ok-bg)",
+    border: "var(--ok-border)",
   },
-  tcc: { label: "TCC", color: "#AA88FF", bg: "#1a0033", border: "#2a0055" },
+  tcc: { label: "TCC", color: "var(--purple)", bg: "var(--purple-bg)", border: "var(--purple-border)" },
 };
 
 export const MAPEO_ESTADOS_TCC = {

@@ -355,9 +355,9 @@ export default function AsesorGuias() {
                               fontSize: "10px",
                               padding: "2px 7px",
                               borderRadius: "20px",
-                              background: "#1a0a2e",
-                              border: "1px solid #3d1a66",
-                              color: "#AA88FF",
+                              background: "var(--purple-bg)",
+                              border: "1px solid var(--purple-border)",
+                              color: "var(--purple)",
                               fontWeight: "500",
                             }}
                           >

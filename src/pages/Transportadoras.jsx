@@ -171,8 +171,8 @@ FROM auth.users WHERE email = '${formUsuario.email}';`
       {msg && (
         <div
           style={{
-            background: msg.tipo === "ok" ? "#0d1f00" : "#2a0000",
-            border: `1px solid ${msg.tipo === "ok" ? "#1a3300" : "#440000"}`,
+            background: msg.tipo === "ok" ? "var(--ok-bg)" : "var(--danger-bg)",
+            border: `1px solid ${msg.tipo === "ok" ? "var(--ok-border)" : "var(--danger-border)"}`,
             borderRadius: "8px",
             padding: "12px 16px",
             marginBottom: "16px",
@@ -517,7 +517,7 @@ FROM auth.users WHERE email = '${formUsuario.email}';`
                         style={{
                           fontSize: "10px",
                           padding: "3px 8px",
-                          border: `1px solid ${t.activa ? "#440000" : "#1a3300"}`,
+                          border: `1px solid ${t.activa ? "var(--danger-border)" : "var(--ok-border)"}`,
                           borderRadius: "4px",
                           background: "transparent",
                           color: t.activa ? "var(--danger)" : "var(--m)",

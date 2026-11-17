@@ -131,12 +131,12 @@ export default function Login() {
           {error && (
             <div
               style={{
-                background: "#2a0000",
-                border: "1px solid #440000",
+                background: "var(--danger-bg)",
+                border: "1px solid var(--danger-border)",
                 borderRadius: "6px",
                 padding: "8px 12px",
                 fontSize: "12px",
-                color: "#FF5555",
+                color: "var(--danger)",
                 marginBottom: "14px",
               }}
             >

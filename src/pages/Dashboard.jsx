@@ -763,7 +763,7 @@ export default function Dashboard() {
       {guiasCriticas.length > 0 && (
         <div
           style={{
-            background: "#1a0800",
+            background: "var(--alert-bg)",
             border: "1px solid var(--danger)",
             borderRadius: 10,
             padding: "14px 16px",

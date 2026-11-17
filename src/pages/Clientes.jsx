@@ -116,7 +116,7 @@ export default function Clientes() {
                       </Td>
                       <Td>
                         <button onClick={() => { setReasignando(reasignando === c.id ? null : c.id); setNuevoAsesorId(c.asesor_id || '') }}
-                          style={{ fontSize: '10px', padding: '3px 9px', border: c.usuarios ? '1px solid var(--blk5)' : '1px solid #440000',
+                          style={{ fontSize: '10px', padding: '3px 9px', border: c.usuarios ? '1px solid var(--blk5)' : '1px solid var(--danger-border)',
                             borderRadius: '4px', background: 'transparent', color: c.usuarios ? 'var(--gray)' : 'var(--danger)', cursor: 'pointer' }}>
                           {c.usuarios ? 'Reasignar' : 'Asignar'}
                         </button>

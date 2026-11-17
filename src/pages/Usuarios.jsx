@@ -183,15 +183,15 @@ export default function Usuarios() {
     },
     transportador: {
       label: "Transportador",
-      color: "#AA88FF",
-      bg: "#1a0a2e",
-      border: "#3d1a66",
+      color: "var(--purple)",
+      bg: "var(--purple-bg)",
+      border: "var(--purple-border)",
     },
     visualizador: {
       label: "Visualizador",
-      color: "#55AAFF",
-      bg: "#001a33",
-      border: "#003366",
+      color: "var(--info)",
+      bg: "var(--info-bg)",
+      border: "var(--info-border)",
     },
   };
 
@@ -221,8 +221,8 @@ export default function Usuarios() {
       {msg && (
         <div
           style={{
-            background: msg.tipo === "ok" ? "#0d1f00" : "#2a0000",
-            border: `1px solid ${msg.tipo === "ok" ? "#1a3300" : "#440000"}`,
+            background: msg.tipo === "ok" ? "var(--ok-bg)" : "var(--danger-bg)",
+            border: `1px solid ${msg.tipo === "ok" ? "var(--ok-border)" : "var(--danger-border)"}`,
             borderRadius: "8px",
             padding: "12px 16px",
             marginBottom: "16px",
@@ -551,7 +551,7 @@ export default function Usuarios() {
                           style={{
                             fontSize: "10px",
                             padding: "3px 8px",
-                            border: `1px solid ${u.activo ? "#440000" : "#1a3300"}`,
+                            border: `1px solid ${u.activo ? "var(--danger-border)" : "var(--ok-border)"}`,
                             borderRadius: "4px",
                             background: "transparent",
                             color: u.activo ? "var(--danger)" : "var(--m)",

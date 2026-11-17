@@ -898,7 +898,7 @@ export default function Guias() {
       {filtroCriticas && (
         <div
           style={{
-            background: "#1a0800",
+            background: "var(--alert-bg)",
             border: "1px solid var(--danger)",
             borderRadius: "8px",
             padding: "10px 14px",
@@ -931,8 +931,8 @@ export default function Guias() {
       {uploadResult && !progreso.activo && (
         <div
           style={{
-            background: uploadResult.error ? "#2a0000" : "#0d1f00",
-            border: `1px solid ${uploadResult.error ? "#440000" : "#1a3300"}`,
+            background: uploadResult.error ? "var(--danger-bg)" : "var(--ok-bg)",
+            border: `1px solid ${uploadResult.error ? "var(--danger-border)" : "var(--ok-border)"}`,
             borderRadius: "8px",
             padding: "12px 16px",
             marginBottom: "16px",
@@ -1193,9 +1193,9 @@ export default function Guias() {
                               fontSize: "10px",
                               padding: "2px 7px",
                               borderRadius: "20px",
-                              background: "#1a0a2e",
-                              border: "1px solid #3d1a66",
-                              color: "#AA88FF",
+                              background: "var(--purple-bg)",
+                              border: "1px solid var(--purple-border)",
+                              color: "var(--purple)",
                               whiteSpace: "nowrap",
                               fontWeight: "500",
                             }}

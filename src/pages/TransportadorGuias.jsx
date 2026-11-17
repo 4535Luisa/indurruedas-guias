@@ -220,7 +220,7 @@ export default function TransportadorGuias() {
               width: "30px",
               height: "30px",
               borderRadius: "50%",
-              background: "#2a1a44",
+              background: "var(--purple-bg)",
               border: "1px solid #AA88FF44",
               display: "flex",
               alignItems: "center",
